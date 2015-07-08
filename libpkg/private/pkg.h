@@ -377,7 +377,7 @@ struct pkg_repo {
 	char *url;
 	char *pubkey;
 	mirror_t mirror_type;
-	type_t type;
+	pkg_repo_type_t type;
 
 	union {
 		struct dns_srvinfo *srv;
