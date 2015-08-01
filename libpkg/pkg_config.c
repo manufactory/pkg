@@ -472,7 +472,7 @@ add_repo(const ucl_object_t *obj, struct pkg_repo *r, const char *rname, pkg_ini
 	ucl_object_iter_t it = NULL;
 	bool enable = true;
 	const char *url = NULL, *pubkey = NULL, *mirror_type = NULL;
-	const char *signature_type = NULL, *fingerprints = NULL;
+	const char *signature_type = NULL, *fingerprints = NULL, *gpg_keyring = NULL;
 	const char *key;
 	const char *type = NULL;
 	int use_ipvx = 0;
@@ -554,6 +554,14 @@ add_repo(const ucl_object_t *obj, struct pkg_repo *r, const char *rname, pkg_ini
 				return;
 			}
 			type = ucl_object_tostring(cur);
+		} else if (strcasecmp(key, "gpg_keyring") == 0) {
+			if (cur->type != UCL_STRING) {
+				pkg_emit_error("Expecting a string for the "
+					"'%s' key of the '%s' repo",
+					key, rname);
+				return;
+			}
+			gpg_keyring = ucl_object_tostring(cur);
 		} else if (strcasecmp(key, "ip_version") == 0) {
 			if (cur->type != UCL_INT) {
 				pkg_emit_error("Expecting a integer for the "
@@ -603,6 +611,11 @@ add_repo(const ucl_object_t *obj, struct pkg_repo *r, const char *rname, pkg_ini
 	if (pubkey != NULL) {
 		free(r->pubkey);
 		r->pubkey = strdup(pubkey);
+	}
+
+	if (gpg_keyring != NULL) {
+		free(r->gpg_keyring);
+		r->gpg_keyring = strdup(gpg_keyring);
 	}
 
 	r->enable = enable;
@@ -1249,6 +1262,12 @@ pkg_repo_type_t
 pkg_repo_type(struct pkg_repo *r)
 {
 	return (r->type);
+}
+
+const char *
+pkg_repo_gpg_keyring(struct pkg_repo *r)
+{
+        return (r->gpg_keyring);
 }
 
 mirror_t
