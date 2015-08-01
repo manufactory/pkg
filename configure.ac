@@ -423,7 +423,7 @@ AC_SUBST([LDNS_LIBS])
 AC_SUBST([LDNS_CFLAGS])
 
 dnl We now support merely binary repos
-m4_define([repos], [binary])
+m4_define([repos], [[binary],[linux_deb]])
 m4_define([repos_ldadd], [])
 m4_define([repos_list], [])
 m4_define([repos_makefiles], [])
@@ -500,7 +500,7 @@ AC_CONFIG_COMMANDS([pkg_repos.h], [[
 		cp $NMODULES pkg_repos.h
 	fi
 	rm $NMODULES
-]], [REPOS=$REPOS])
+]], [REPOS="$REPOS"])
 
 AC_CONFIG_COMMANDS([mkdir], [$MKDIR_P tests/frontend])
 
