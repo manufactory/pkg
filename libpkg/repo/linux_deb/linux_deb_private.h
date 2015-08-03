@@ -625,6 +625,8 @@ const char * pkg_repo_linux_deb_get_filename(const char *name);
 #define DEBIAN_RELASE_FILE_SIG "Release.gpg"
 #define DEBIAN_PACKAGES_FILE "Packages.gz"
 
+#define STRLEN(s) (sizeof(s)/sizeof(s[0]))
+
 typedef enum _pkg_repo_debian_hash {
         PKG_REPO_DEBIAN_MD5 = 0,
         PKG_REPO_DEBIAN_SHA1,

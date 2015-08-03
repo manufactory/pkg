@@ -43,6 +43,7 @@
 
 #include <fcntl.h>
 #include <ctype.h>
+#include <regex.h>
 
 #include "pkg.h"
 #include "private/event.h"
@@ -181,7 +182,7 @@ pkg_repo_linux_deb_parse_relase_hash(FILE *fp, char *filename, char *hash)
 }
 
 static int
-pkg_repo_linux_deb_fetch_check_extract_packages(struct pkg_repo *repo, int fd, FILE *release_fp) {
+pkg_repo_linux_deb_fetch_check_extract_packages(struct pkg_repo *repo, int *fd, FILE *release_fp) {
         
         char packages_url[MAXPATHLEN]; /* Packages.gz */
  
@@ -197,6 +198,10 @@ pkg_repo_linux_deb_fetch_check_extract_packages(struct pkg_repo *repo, int fd, F
         const char *abi;
         const char *distribution; /* like main, contrib, non-free, ... */
         int ret = EPKG_FATAL;
+
+        /* archive_read_extract() uses sets the fd to the extracted archive 
+         * we still need to close the old one */
+        //int fd_unextracted = -1;
 
         /* small TODO: check if size, hash has changed, take infos from existing Release file
          * if yes there's nothing to download. */
@@ -236,7 +241,7 @@ pkg_repo_linux_deb_fetch_check_extract_packages(struct pkg_repo *repo, int fd, F
                 goto cleanup;
         }
 
-        fd = open(packages_file, O_RDONLY);
+        *fd = open(packages_file, O_RDONLY);
 
         if (release_fp == NULL) {
                 pkg_emit_errno("open", "");
@@ -252,7 +257,7 @@ pkg_repo_linux_deb_fetch_check_extract_packages(struct pkg_repo *repo, int fd, F
                 goto cleanup;
         }
 
-        fetched_hash = pkg_checksum_fd(fd, PKG_HASH_TYPE_SHA256_HEX);
+        fetched_hash = pkg_checksum_fd(*fd, PKG_HASH_TYPE_SHA256_HEX);
 
         if (fetched_hash == NULL) {
                 pkg_emit_error("Error calculating hash for %s", DEBIAN_PACKAGES_FILE);
@@ -267,14 +272,16 @@ pkg_repo_linux_deb_fetch_check_extract_packages(struct pkg_repo *repo, int fd, F
 
         /* extract Packages */
 
-        (void)lseek(fd, 0, SEEK_SET);
+        (void)lseek(*fd, 0, SEEK_SET);
 
         strlcpy(packages_file_extracted, packages_file,
                 sizeof(packages_file_extracted));
         pkg_add_file_random_suffix(packages_file_extracted, sizeof(packages_file_extracted), 12);
         
-        ret = pkg_repo_util_extract_fd(fd, packages_file,
+        //fd_unextracted = dup(*fd);
+        ret = pkg_repo_util_extract_fd(*fd, packages_file,
                 packages_file_extracted);
+        
 
         if (ret != EPKG_OK) {
                 goto cleanup;
@@ -282,13 +289,128 @@ pkg_repo_linux_deb_fetch_check_extract_packages(struct pkg_repo *repo, int fd, F
 
 cleanup:
         free(fetched_hash);
+//        close(fd_unextracted);
+        
+        /* remove zipped original */
+        (void) unlink(packages_file);
         
         if (ret != EPKG_OK) {
-                (void) unlink(packages_file);
                 (void) unlink(packages_file_extracted);
         }
 
         return ret;
+}
+
+static int
+pkg_repo_linux_deb_parse_packages(FILE *fp) {
+        int ret = -1;
+        char buf[BUFSIZ];
+
+        struct pkg *pkg;
+
+        char *pos;
+
+        int offset = -1;
+
+        struct utsname u;
+        char *arch;
+        char *abi;
+        
+        u = uname(&u);
+        pos = strstr(u.version, ".");
+
+        if (pos == NULL) {
+                pkg_emit_error("could not detect OS version.");
+                return EPKG_FATAL;
+        }
+
+        //strlcpy(&os_version, u.version, pos)        
+
+        /* pos + */
+        arch_size = sizeof("FreeBSD:") + sizeof(char) * (pos + strlen(abi));
+
+        char *arch = (char *) malloc(arch_size);
+
+        ret = fseek(fp, 0, SEEK_SET);
+
+        if (ret == -1) {
+                pkg_emit_errno("fseek", "");
+                return EPKG_FATAL;
+        }
+
+
+        while (fgets(buf, BUFSIZ, fp) != NULL) {
+
+                ret = pkg_new(&pkg, PKG_REMOTE);
+                if (ret != EPKG_OK) {
+                        return EPKG_FATAL;
+                }
+
+                pos = strstr(buf,"Package:"); 
+                if (pos != NULL) {
+                        /* STRLEN includes \0, so no +1 for blank 
+                         * necessary */
+                        pos += STRLEN("Package:");
+                        pkg->name = strdup(pos);
+                        pkg_debug(1, "pkg->name: %s",pkg->name);
+                }
+                
+                pos = strstr(buf,"Version:"); 
+                if (pos != NULL) {
+                        pos += STRLEN("Version:");
+                        pkg->version = strdup(pos);
+                        pkg_debug(1, "pkg->version: %s",pkg->name);
+                }
+                
+                pos = strstr(buf,"Installed-Size:"); 
+                if (pos != NULL) {
+                        pos += STRLEN("Installed-Size:");
+                        pkg->flatsize = (int64_t) strtoll(buf, NULL, 10);
+                        pkg_debug(1, "pkg->version: %s",pkg->name);
+                }
+
+                pos = strstr(buf,"Maintainer:"); 
+                if (pos != NULL) {
+                        pos += strstr(buf, "<") + 1;
+                        offset = strlen(buf) - pos - 1;
+                        pkg->maintainer = strndup(buf, offset);
+                        pkg_debug(1, "pkg->version: %s",pkg->name);
+                }
+                
+                pos = strstr(buf,"Architecture:"); 
+                if (pos != NULL) {
+                        /*TODO: maybe report something on non FreeBSD-Systems */
+                        pkg->arch = arch; // should be safe not to strdup
+                        pkg_debug(1, "pkg->arch: %s",pkg->arch);
+                }
+                
+                pos = strstr(buf,"Description:"); 
+                if (pos != NULL) {
+                        pos += STRLEN("Description:");
+                        pkg->comment = strdup(pos);
+                        pkg_debug(1, "pkg->comment: %s",pkg->comment);
+                }
+                
+                pos = strstr(buf,"Homepage:"); 
+                if (pos != NULL) {
+                        pos += STRLEN("Homepage:");
+                        pkg->www = strdup(pos);
+                        pkg_debug(1, "pkg->www: %s",pkg->www);
+                }
+                
+                pos = strstr(buf,"Filename:"); 
+                if (pos != NULL) {
+                        pos += STRLEN("Filename:");
+                        pkg->repopath = strdup(pos);
+                        pkg_debug(1, "pkg->repopath: %s",pkg->repopath);
+                }
+
+
+                /* packages separated by newline */
+                if (buf[0] == '\n')
+                        break;
+        }
+        return EPKG_FATAL;       
 }
 
 
@@ -716,6 +838,7 @@ pkg_repo_linux_deb_update_proceed(const char *name, struct pkg_repo *repo,
         char release_path[MAXPATHLEN];
         FILE *release_fp;
         int packages_fd = -1;
+        FILE *packages_fp = NULL;
 
         pkg_debug(1, "Pkgrepo, begin update of '%s'", name);
 
@@ -743,11 +866,25 @@ pkg_repo_linux_deb_update_proceed(const char *name, struct pkg_repo *repo,
                 return EPKG_FATAL;
         }
         
-        rc = pkg_repo_linux_deb_fetch_check_extract_packages(repo, packages_fd, release_fp);
+        //rc = pkg_repo_linux_deb_fetch_check_extract_packages(repo, &packages_fd, release_fp);
 
-        if (rc != EPKG_OK) {
+//        if (rc != EPKG_OK) {
+//                goto cleanup;
+//        }
+
+        packages_fd = open("/tmp/Packages", O_RDONLY);
+
+        packages_fp = fdopen(packages_fd, "r");
+
+        pkg_debug(1, "fuck");
+
+        if (packages_fp == NULL) {
+                pkg_emit_errno("fdopen", "");
                 goto cleanup;
         }
+        pkg_debug(1, "fuck2");
+
+        pkg_repo_linux_deb_parse_packages(packages_fp);
 
 
 /* stolen code that can stay */
@@ -797,7 +934,12 @@ pkg_repo_linux_deb_update_proceed(const char *name, struct pkg_repo *repo,
 */
 cleanup:
         close(packages_fd);
-        //close(fd);
+        pkg_debug(1, "fuck3");
+ 
+        /* errors could have happened before, packages_fp is set */
+        if (packages_fp != NULL)
+                fclose(packages_fp);
+        pkg_debug(1, "fuck the hell");
 
 /* stolen code that can stay: 
  *

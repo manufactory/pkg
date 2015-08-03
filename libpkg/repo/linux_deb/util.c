@@ -167,3 +167,10 @@ cleanup:
         }
         return retcode;
 }
+
+/* Database funtctions */
+
+//pkg_repo_util_add_pkg(sqlite3 sqlite, struct pkg *pkg) {
+//
+//
+//}
