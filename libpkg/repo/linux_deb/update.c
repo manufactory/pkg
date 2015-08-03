@@ -43,7 +43,7 @@
 
 #include <fcntl.h>
 #include <ctype.h>
-#include <regex.h>
+#include  <sys/utsname.h>
 
 #include "pkg.h"
 #include "private/event.h"
@@ -315,21 +315,30 @@ pkg_repo_linux_deb_parse_packages(FILE *fp) {
         struct utsname u;
         char *arch;
         char *abi;
+        size_t arch_size;
         
-        u = uname(&u);
-        pos = strstr(u.version, ".");
+        ret = uname(&u);
+        if (ret == -1) {
+                pkg_emit_errno("uname", "");
+                return EPKG_FATAL;
+        }
+
+        pos = strchr(u.version, '.');
 
         if (pos == NULL) {
                 pkg_emit_error("could not detect OS version.");
                 return EPKG_FATAL;
         }
+        
+        abi = strrchr(pkg_object_string(pkg_config_get("ABI")), ':') + 1;
 
         //strlcpy(&os_version, u.version, pos)        
 
         /* pos + */
-        arch_size = sizeof("FreeBSD:") + sizeof(char) * (pos + strlen(abi));
+        arch_size = sizeof("FreeBSD:") + sizeof(char) * ((u.version - pos) +
+                strlen(abi));
 
-        char *arch = (char *) malloc(arch_size);
+        arch = (char *) malloc(arch_size);
 
         ret = fseek(fp, 0, SEEK_SET);
 
@@ -359,22 +368,23 @@ pkg_repo_linux_deb_parse_packages(FILE *fp) {
                 if (pos != NULL) {
                         pos += STRLEN("Version:");
                         pkg->version = strdup(pos);
-                        pkg_debug(1, "pkg->version: %s",pkg->name);
+                        pkg_debug(1, "pkg->version: %s",pkg->version);
                 }
                 
                 pos = strstr(buf,"Installed-Size:"); 
                 if (pos != NULL) {
                         pos += STRLEN("Installed-Size:");
-                        pkg->flatsize = (int64_t) strtoll(buf, NULL, 10);
-                        pkg_debug(1, "pkg->version: %s",pkg->name);
+                        pkg->flatsize = (int64_t) strtoll(pos, NULL, 10);
+                        pkg_debug(1, "pkg->is: %ld",pkg->flatsize);
                 }
 
                 pos = strstr(buf,"Maintainer:"); 
                 if (pos != NULL) {
-                        pos += strstr(buf, "<") + 1;
-                        offset = strlen(buf) - pos - 1;
+                        pos = strchr(buf, '<') + 1;
+                        //offset = strlen(buf) - pos - 1;
+                        offset = strrchr(buf, '>') - pos;
                         pkg->maintainer = strndup(buf, offset);
-                        pkg_debug(1, "pkg->version: %s",pkg->name);
+                        pkg_debug(1, "pkg->maintainer: %s",pkg->maintainer);
                 }
                 
                 pos = strstr(buf,"Architecture:"); 
