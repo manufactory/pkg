@@ -109,10 +109,10 @@ pkg_repo_linux_deb_query(struct pkg_repo *repo, const char *pattern, match_t mat
 	const char	*comp = NULL;
 	int		 ret;
 	char		 basesql[BUFSIZ] = ""
-		"SELECT id, origin, name, name as uniqueid, version, comment, "
+		"SELECT id, name, name as uniqueid, version, comment, "
 		"prefix, desc, arch, maintainer, www, "
-		"licenselogic, flatsize, pkgsize, "
-		"cksum, manifestdigest, path AS repopath, '%s' AS dbname "
+		"flatsize, pkgsize, "
+		"cksum, path AS repopath, '%s' AS dbname "
 		"FROM packages AS p";
 
 	if (match != MATCH_ALL && (pattern == NULL || pattern[0] == '\0'))

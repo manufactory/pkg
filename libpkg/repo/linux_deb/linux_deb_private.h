@@ -31,29 +31,30 @@
 static const char linux_deb_repo_initsql[] = ""
 	"CREATE TABLE packages ("
 	    "id INTEGER PRIMARY KEY,"
-	    "origin TEXT,"
+//	    "origin TEXT,"
 	    "name TEXT NOT NULL,"
 	    "version TEXT NOT NULL,"
 	    "comment TEXT NOT NULL,"
-	    "desc TEXT NOT NULL,"
-	    "osversion TEXT,"
+//	    "desc TEXT NOT NULL,"
+//	    "osversion TEXT,"
 	    "arch TEXT NOT NULL,"
 	    "maintainer TEXT NOT NULL,"
 	    "www TEXT,"
 	    "prefix TEXT NOT NULL,"
 	    "pkgsize INTEGER NOT NULL,"
 	    "flatsize INTEGER NOT NULL,"
-	    "licenselogic INTEGER NOT NULL,"
+//	    "licenselogic INTEGER NOT NULL,"
 	    "cksum TEXT NOT NULL,"
 	    /* relative path to the package in the repository */
-	    "path TEXT NOT NULL,"
-	    "pkg_format_version INTEGER,"
-	    "manifestdigest TEXT NULL,"
-	    "olddigest TEXT NULL,"
-	    "dep_formula TEXT NULL"
+	    //"path TEXT NOT NULL,"
+	    "path TEXT NOT NULL"
+//	    "pkg_format_version INTEGER,"
+//	    "manifestdigest TEXT NULL,"
+//	    "olddigest TEXT NULL,"
+//	    "dep_formula TEXT NULL"
 	");"
 	"CREATE TABLE deps ("
-	    "origin TEXT,"
+//	    "origin TEXT,"
 	    "name TEXT,"
 	    "version TEXT,"
 	    "package_id INTEGER REFERENCES packages(id)"
@@ -183,7 +184,7 @@ static const char linux_deb_repo_initsql[] = ""
 	"CREATE INDEX packages_version ON packages(name, version);"
 	"CREATE UNIQUE INDEX packages_digest ON packages(manifestdigest);"*/
 	/* FTS search table */
-	"CREATE VIRTUAL TABLE pkg_search USING fts4(id, name, origin);"
+//	"CREATE VIRTUAL TABLE pkg_search USING fts4(id, name, origin);"
 
 	"PRAGMA user_version=%d;"
 	;
@@ -590,19 +591,19 @@ typedef enum _sql_prstmt_index {
 	DEPS,
 	CAT1,
 	CAT2,
-	LIC1,
-	LIC2,
-	OPT1,
-	OPT2,
+//	LIC1,
+//	LIC2,
+//	OPT1,
+//	OPT2,
 	SHLIB1,
 	SHLIB_REQD,
 	SHLIB_PROV,
 	ANNOTATE1,
 	ANNOTATE2,
 	EXISTS,
-	REPO_VERSION,
-	DELETE,
-	FTS_APPEND,
+	//REPO_VERSION,
+	//DELETE,
+	//FTS_APPEND,
 	PROVIDE,
 	PROVIDES,
 	REQUIRE,

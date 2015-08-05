@@ -36,7 +36,7 @@
 #include "linux_deb_private.h"
 
 static sql_prstmt sql_prepared_statements[PRSTMT_LAST] = {
-	[PKG] = {
+/*	[PKG] = {
 		NULL,
 		"INSERT OR REPLACE INTO packages ("
 		"origin, name, version, comment, desc, arch, maintainer, www, "
@@ -44,11 +44,21 @@ static sql_prstmt sql_prepared_statements[PRSTMT_LAST] = {
 		")"
 		"VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)",
 		"TTTTTTTTTIIITTTT",
-	},
+	}, */
+        [PKG] = {
+                NULL,
+		"INSERT OR REPLACE INTO packages ("
+		"name, version, comment, arch, maintainer, www, "
+		"prefix, pkgsize, flatsize, cksum, path"
+		")"
+		"VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+                "TTTTTTTIITT",
+        },
 	[DEPS] = {
 		NULL,
-		"INSERT OR REPLACE INTO deps (origin, name, version, package_id) "
-		"VALUES (?1, ?2, ?3, ?4)",
+//		"INSERT OR REPLACE INTO deps (origin, name, version, package_id) "
+		"INSERT OR REPLACE INTO deps (name, version, package_id) "
+		"VALUES (?1, ?2, ?3)",
 		"TTTI",
 	},
 	[CAT1] = {
@@ -62,7 +72,7 @@ static sql_prstmt sql_prepared_statements[PRSTMT_LAST] = {
 		"VALUES (?1, (SELECT id FROM categories WHERE name = ?2))",
 		"IT",
 	},
-	[LIC1] = {
+/*	[LIC1] = {
 		NULL,
 		"INSERT OR IGNORE INTO licenses(name) VALUES(?1)",
 		"T",
@@ -84,7 +94,7 @@ static sql_prstmt sql_prepared_statements[PRSTMT_LAST] = {
 		"INSERT OR ROLLBACK INTO pkg_option (option_id, value, package_id) "
 		"VALUES (( SELECT option_id FROM option WHERE option = ?1), ?2, ?3)",
 		"TTI",
-	},
+	},*/
 	[SHLIB1] = {
 		NULL,
 		"INSERT OR IGNORE INTO shlibs(name) VALUES(?1)",
@@ -121,23 +131,23 @@ static sql_prstmt sql_prepared_statements[PRSTMT_LAST] = {
 		" (SELECT annotation_id FROM annotation WHERE annotation=?3))",
 		"ITT",
 	},
-	[REPO_VERSION] = {
+/*	[REPO_VERSION] = {
 		NULL,
 		"SELECT version FROM packages WHERE origin=?1",
 		"T",
-	},
-	[DELETE] = {
+	},*/
+/*	[DELETE] = {
 		NULL,
 		"DELETE FROM packages WHERE origin=?1;"
 		"DELETE FROM pkg_search WHERE origin=?1;",
 		"TT",
-	},
-	[FTS_APPEND] = {
+	},*/
+/*	[FTS_APPEND] = {
 		NULL,
 		"INSERT OR IGNORE INTO pkg_search(id, name, origin) "
 		"VALUES (?1, ?2 || '-' || ?3, ?4);",
 		"ITTT"
-	},
+	},*/
 	[PROVIDE] = {
 		NULL,
 		"INSERT OR IGNORE INTO provides(provide) VALUES(?1)",
