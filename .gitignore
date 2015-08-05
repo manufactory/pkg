@@ -55,6 +55,7 @@ external/blake2/Makefile
 /libpkg/Makefile
 /libpkg/repo/Makefile
 /libpkg/repo/binary/Makefile
+/libpkg/repo/linux_deb/Makefile
 /libtool
 /ltmain.sh
 /pkg_config.h
