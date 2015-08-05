@@ -301,8 +301,51 @@ cleanup:
         return ret;
 }
 
+static int
+pkg_repo_linux_deb_parse_dependency(struct pkg *pkg, char *line)
+{
+        char *token;
 
-/* this function is way too long */
+        char *begin, *pos;
+
+        struct pkg_dep *dep;
+
+        char *has_version;
+        int len;
+
+        while((token = strsep(&line, ",")) != NULL) {
+                has_version = strrchr(token, ')');
+                
+                pkg_dep_new(&dep);
+
+                if (has_version != NULL) {
+                        pos = strchr(&token[1], ' '); 
+                        len = pos - token - 1;
+                        dep->name = strndup(&token[1], len);
+                } else {
+                        dep->name = strdup(token);
+                        dep->version = NULL;
+                        continue;
+                }
+
+                printf("name:\"%s\"\n", dep->name);
+
+                //      alternatives = strchr(&token[len + 2], '|');
+                //      if (alternatives)
+
+                begin = strchr(&token[len + 2], ' ');
+                pos = strchr(&token[len + 2], ')') ;
+                len = pos - begin - 1;
+                dep->version = strndup(begin + 1, len);
+                printf(" version:\"%s\"\n", dep->version);
+                
+                // HASH_ADD_KEYPTR(hh, pkg->deps, dep->name,
+                //        strlen(dep->name), dep);
+        }
+
+        return EPKG_OK;
+}
+
 static int
 pkg_repo_linux_deb_parse_packages(struct pkg_repo *repo, FILE *fp, sqlite3 *sqlite) {
         int ret = -1;
@@ -312,6 +355,7 @@ pkg_repo_linux_deb_parse_packages(struct pkg_repo *repo, FILE *fp, sqlite3 *sqli
         struct pkg_dep *dep = NULL;
 
         char *pos, *pos2;
+        char *next;
 
         int offset = -1;
 
@@ -383,6 +427,7 @@ pkg_repo_linux_deb_parse_packages(struct pkg_repo *repo, FILE *fp, sqlite3 *sqli
                 return EPKG_FATAL;
         }
 
+        /* this loop is way too long */
         while (fgets(buf, BUFSIZ, fp) != NULL) {
                 //pkg_debug(1, "WHILE");
 
@@ -460,29 +505,49 @@ pkg_repo_linux_deb_parse_packages(struct pkg_repo *repo, FILE *fp, sqlite3 *sqli
                         pos = strstr(buf,"Depends:"); 
                         if (pos != NULL) {
                                 pos += STRLEN("Depends:");
-                                pkg_dep_new(&dep);
+                                pkg_repo_linux_deb_parse_dependency(
+                                        pkg, pos);
+                                //pkg_dep_new(&dep);
 
-                                //while() {
-                                pos2 = strchr(pos, ' '); 
-                                dep->name = strndup(pos, pos2 - pos);
-
-                                /* not all dependencies have versions,
-                                 * if yes, it's in parentesis */
-                                if (pos2[1] == '(') {
-                                        dver_start = strchr(&pos2[1], ' ');
-                                        dver_end = strchr(&pos2[1], ')');
-                                        dep->version = strndup(dver_start + 1
-                                                        , dver_end - dver_start - 1);
-                                }
-                                pkg_debug(1, "depn: %s", dep->name);
-                                pkg_debug(1, "depv: %s", dep->version);
-                                //}
+//                                next = pos;
+//
+//                                int c = 0;
+//
+//                                while(next != NULL && *next != '\n') {
+//                                        c++;
+//                                        pos2 = strchr(next, ' '); 
+//                                        dep->name = strndup(next, pos2 - next);
+//
+//                                        /* not all dependencies have versions,
+//                                         * if yes, it's in parentesis */
+//                                        if (pos2[1] == '(') {
+//                                                dver_start = strchr(&pos2[1], ' ');
+//                                                dver_end = strchr(&pos2[1], ')');
+//                                                dep->version = strndup(dver_start + 1
+//                                                                , dver_end - dver_start - 1);
+//                                                
+//                                                /* ',' is always after ) */
+//                                                next = dver_end + 1;
+//                                                printf("next1: %s,\n", next);
+//                                        } else {
+//                                                /* otherwhise we have to
+//                                                 * search */
+//                                                next = strchr(pos2, ',');
+//                                                printf("next2: %s,\n", next);
+//
+//                                        }
+//
+//                                        pkg_debug(1, "depn: %s", dep->name);
+//                                        pkg_debug(1, "depv: %s", dep->version);
+//
+//                                        if (c == 4)
+//                                        break;
+//                                }
                         }
+
                         continue;
                 }
 
-                // HASH_ADD_KEYPTR(hh, pkg->deps, dep->name,
-                //        strlen(dep->name), dep);
 
 
 
@@ -521,10 +586,8 @@ pkg_repo_linux_deb_parse_packages(struct pkg_repo *repo, FILE *fp, sqlite3 *sqli
                         pkg_debug(1, "pkg->digest: %s",pkg->digest);
                         continue;
                 }
-
         }
-               
-        //}
+
                 pkg_debug(1,"pd:%s", pkg->digest);
                 pkg_debug(1,"pn:%s",pkg->name);
                 //belongs to loop actually
