@@ -307,26 +307,45 @@ pkg_repo_linux_deb_parse_dependency(struct pkg *pkg, char *line)
         char *token;
 
         char *begin, *pos;
+        char *name, *last = NULL, *version;
 
         struct pkg_dep *dep;
 
+        //TODO: fix to bool or so, this is ugly
         char *has_version;
         int len;
 
         while((token = strsep(&line, ",")) != NULL) {
                 has_version = strrchr(token, ')');
                 
-                pkg_dep_new(&dep);
 
                 if (has_version != NULL) {
                         pos = strchr(&token[1], ' '); 
                         len = pos - token - 1;
-                        dep->name = strndup(&token[1], len);
+                        name = strndup(&token[1], len);
                 } else {
-                        dep->name = strdup(token);
-                        dep->version = NULL;
+                        name = strdup(token);
+                        version = NULL;
+                       // continue;
+                }
+
+                /* dependency appear twice.
+                 * that happens when version constrains are defined like
+                 * v_old <= reqired_v < v_new */
+                if (last != NULL && strcmp(name, last) == 0) {
+                        last = name;
                         continue;
                 }
+
+                last = name;
+                
+                pkg_dep_new(&dep);
+                dep->name = name;
+
+                if (has_version == NULL)
+                        continue;
+                
+                dep->version = version;
 
                 printf("name:\"%s\"\n", dep->name);
 
@@ -338,9 +357,8 @@ pkg_repo_linux_deb_parse_dependency(struct pkg *pkg, char *line)
                 len = pos - begin - 1;
                 dep->version = strndup(begin + 1, len);
                 printf(" version:\"%s\"\n", dep->version);
+                HASH_ADD_KEYPTR(hh, pkg->deps, dep->name, strlen(dep->name), dep);
                 
-                // HASH_ADD_KEYPTR(hh, pkg->deps, dep->name,
-                //        strlen(dep->name), dep);
         }
 
         return EPKG_OK;
@@ -505,9 +523,9 @@ pkg_repo_linux_deb_parse_packages(struct pkg_repo *repo, FILE *fp, sqlite3 *sqli
                         pos = strstr(buf,"Depends:"); 
                         if (pos != NULL) {
                                 pos += STRLEN("Depends:");
+                                //pkg_dep_new(&dep);
                                 pkg_repo_linux_deb_parse_dependency(
                                         pkg, pos);
-                                //pkg_dep_new(&dep);
 
 //                                next = pos;
 //
@@ -606,7 +624,14 @@ ret =                         pkg_repo_linux_deb_run_prstatement(PKG, pkg->name,
                 pkg_debug(1, "AFTER");
 
 cleanup:
-        //free(arch);
+        ;
+        struct pkg_dep *v, *vtmp;
+        HASH_ITER(hh, pkg->deps, v, vtmp) { 
+                 //HASH_DELETE(hh, problem->variables_by_uid, v); 
+                 pkg_debug(1, "1:%s", v->name);
+        }
+
+
         return EPKG_FATAL;       
 }
 
