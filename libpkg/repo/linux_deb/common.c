@@ -59,7 +59,7 @@ static sql_prstmt sql_prepared_statements[PRSTMT_LAST] = {
 //		"INSERT OR REPLACE INTO deps (origin, name, version, package_id) "
 		"INSERT OR REPLACE INTO deps (name, version, package_id) "
 		"VALUES (?1, ?2, ?3)",
-		"TTTI",
+		"TTI",
 	},
 	[CAT1] = {
 		NULL,

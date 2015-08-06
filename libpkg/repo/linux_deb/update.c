@@ -384,6 +384,8 @@ pkg_repo_linux_deb_parse_packages(struct pkg_repo *repo, FILE *fp, sqlite3 *sqli
         char *dver_start;
         char *dver_end;
 
+        int64_t package_id;
+
 //        size_t arch_size;
 
         /* get ABI */        
@@ -615,6 +617,17 @@ ret =                         pkg_repo_linux_deb_run_prstatement(PKG, pkg->name,
                         pkg->arch, pkg->maintainer,
                         pkg->www, pkg->prefix, pkg->pkgsize, pkg->flatsize,
                         pkg->digest, pkg->repopath);
+
+        package_id = sqlite3_last_insert_rowid(sqlite);
+        dep = NULL;
+
+        while (pkg_deps(pkg, &dep) == EPKG_OK) {
+                if (pkg_repo_linux_deb_run_prstatement(DEPS, dep->name,
+                        dep->version, package_id) != SQLITE_DONE) {
+                        ERROR_SQLITE(sqlite, pkg_repo_linux_deb_sql_prstatement(DEPS));
+                        return (EPKG_FATAL);
+                }
+        }
 
                 pkg_debug(1, "ret: %d", ret);
                 if (ret != SQLITE_DONE) {
