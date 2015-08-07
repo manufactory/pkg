@@ -385,6 +385,7 @@ pkg_repo_linux_deb_parse_packages(struct pkg_repo *repo, FILE *fp, sqlite3 *sqli
         char *dver_end;
 
         int64_t package_id;
+        size_t len;
 
 //        size_t arch_size;
 
@@ -447,6 +448,8 @@ pkg_repo_linux_deb_parse_packages(struct pkg_repo *repo, FILE *fp, sqlite3 *sqli
                 return EPKG_FATAL;
         }
 
+        int c = 0;
+
         /* this loop is way too long */
         while (fgets(buf, BUFSIZ, fp) != NULL) {
                 //pkg_debug(1, "WHILE");
@@ -454,13 +457,71 @@ pkg_repo_linux_deb_parse_packages(struct pkg_repo *repo, FILE *fp, sqlite3 *sqli
 
                 /* packages separated by newline */
                 if (buf[0] == '\n') {
+                        /* write last pkg to db */
+
+                        /* fill non parsed entries */
                         pkg->prefix = strdup(pkg_repo_prefix(repo));
-                        break;
+
+                        /* database code */
+                        pkg_debug(1, "BEFORE");
+                        ret = pkg_repo_linux_deb_run_prstatement(PKG, pkg->name,
+                                        pkg->version, pkg->comment,/* pkg->desc,*/
+                                        pkg->arch, pkg->maintainer,
+                                        pkg->www, pkg->prefix, pkg->pkgsize, pkg->flatsize,
+                                        pkg->digest, pkg->repopath);
+
+                        pkg_debug(1, "ret: %d", ret);
+                        if (ret != SQLITE_DONE) {
+                                pkg_debug(1, "pkgn: %s", pkg->name);
+                                pkg_debug(1, "pkgv: %s", pkg->version);
+                                pkg_debug(1, "pkgis: %s", pkg->flatsize);
+                                pkg_debug(1, "pkgm: %s", pkg->maintainer);
+                                pkg_debug(1, "pkgck: %s", pkg->digest);
+                                pkg_debug(1, "pkgsz: %s", pkg->pkgsize);
+                                pkg_debug(1, "pkgwww: %s", pkg->www);
+                                pkg_debug(1, "pkgfp: %s", pkg->repopath);
+                                pkg_debug(1, "pkgcm: %s", pkg->comment);
+                                pkg_debug(1, "pkgpx: %s", pkg->prefix);
+                                pkg_debug(1, "pkgarch: %s", pkg->arch);
+                                
+                                ERROR_SQLITE(sqlite, "grmbl");
+                                goto cleanup;
+                        }
+
+                        package_id = sqlite3_last_insert_rowid(sqlite);
+                        dep = NULL;
+
+                        while (pkg_deps(pkg, &dep) == EPKG_OK) {
+                                if (pkg_repo_linux_deb_run_prstatement(DEPS, dep->name,
+                                                        dep->version, package_id) != SQLITE_DONE) {
+                                        ERROR_SQLITE(sqlite, pkg_repo_linux_deb_sql_prstatement(DEPS));
+                                        return (EPKG_FATAL);
+                                }
+                        }
+
+                        pkg_debug(1, "AFTER");
+
+
+                        //c++;
+                        //pkg_debug(1, "c: %d", c);
+                        if (c == 10)
+                                break;
+
+
+                        /* create new package */
+
+                        /**/
+                        /* next = fgetln(fp, &len);
+                        if (next == NULL && feof(fp)) {
+                                break; 
+                        } */
+
+                        //                        break;
                         ret = pkg_new(&pkg, PKG_REMOTE);
                         if (ret != EPKG_OK) {
                                 return EPKG_FATAL;
                         }
-                        
+                        continue;
                 }
 
                 pos = strstr(buf,"Package:"); 
@@ -503,7 +564,7 @@ pkg_repo_linux_deb_parse_packages(struct pkg_repo *repo, FILE *fp, sqlite3 *sqli
                         pos = strchr(buf, '<') + 1;
                         //offset = strlen(buf) - pos - 1;
                         offset = strrchr(buf, '>') - pos;
-                        pkg->maintainer = strndup(buf, offset);
+                        pkg->maintainer = strndup(pos, offset);
                         pkg_debug(1, "pkg->maintainer: %s",pkg->maintainer);
                         continue;
                 }
@@ -511,6 +572,7 @@ pkg_repo_linux_deb_parse_packages(struct pkg_repo *repo, FILE *fp, sqlite3 *sqli
                 pos = strstr(buf,"Architecture:"); 
                 if (pos != NULL) {
                         /*TODO: maybe report something on non FreeBSD-Systems */
+                        /*TODO: handle "same" */
                         if (strstr(buf,"all"))
                                 pkg->arch = strdup(arch_all);
                         else
@@ -521,55 +583,17 @@ pkg_repo_linux_deb_parse_packages(struct pkg_repo *repo, FILE *fp, sqlite3 *sqli
                 }
 
                 /* there is Pre-Depends too.... */
-                if (strncmp(buf, "Depends:", NELEM("Depends:") - 1) == 0) {
+                /*if (strncmp(buf, "Depends:", NELEM("Depends:") - 1) == 0) {
                         pos = strstr(buf,"Depends:"); 
                         if (pos != NULL) {
                                 pos += STRLEN("Depends:");
                                 //pkg_dep_new(&dep);
                                 pkg_repo_linux_deb_parse_dependency(
-                                        pkg, pos);
-
-//                                next = pos;
-//
-//                                int c = 0;
-//
-//                                while(next != NULL && *next != '\n') {
-//                                        c++;
-//                                        pos2 = strchr(next, ' '); 
-//                                        dep->name = strndup(next, pos2 - next);
-//
-//                                        /* not all dependencies have versions,
-//                                         * if yes, it's in parentesis */
-//                                        if (pos2[1] == '(') {
-//                                                dver_start = strchr(&pos2[1], ' ');
-//                                                dver_end = strchr(&pos2[1], ')');
-//                                                dep->version = strndup(dver_start + 1
-//                                                                , dver_end - dver_start - 1);
-//                                                
-//                                                /* ',' is always after ) */
-//                                                next = dver_end + 1;
-//                                                printf("next1: %s,\n", next);
-//                                        } else {
-//                                                /* otherwhise we have to
-//                                                 * search */
-//                                                next = strchr(pos2, ',');
-//                                                printf("next2: %s,\n", next);
-//
-//                                        }
-//
-//                                        pkg_debug(1, "depn: %s", dep->name);
-//                                        pkg_debug(1, "depv: %s", dep->version);
-//
-//                                        if (c == 4)
-//                                        break;
-//                                }
+                                                pkg, pos);
                         }
 
                         continue;
-                }
-
-
-
+                }*/
 
                 //      pkg->version = strdup(pos);
                 //       pkg_debug(1, "pkg->version: %s",pkg->version);
@@ -604,45 +628,22 @@ pkg_repo_linux_deb_parse_packages(struct pkg_repo *repo, FILE *fp, sqlite3 *sqli
                         pos += STRLEN("SHA256:");
                         pkg->digest = strdup(pos);
                         pkg_debug(1, "pkg->digest: %s",pkg->digest);
+
                         continue;
                 }
-        }
 
-                pkg_debug(1,"pd:%s", pkg->digest);
-                pkg_debug(1,"pn:%s",pkg->name);
+                //pkg_debug(1,"pd:%s", pkg->digest);
+                //pkg_debug(1,"pn:%s",pkg->name);
                 //belongs to loop actually
-                pkg_debug(1, "BEFORE");
-ret =                         pkg_repo_linux_deb_run_prstatement(PKG, pkg->name,
-                        pkg->version, pkg->comment,/* pkg->desc,*/
-                        pkg->arch, pkg->maintainer,
-                        pkg->www, pkg->prefix, pkg->pkgsize, pkg->flatsize,
-                        pkg->digest, pkg->repopath);
-
-        package_id = sqlite3_last_insert_rowid(sqlite);
-        dep = NULL;
-
-        while (pkg_deps(pkg, &dep) == EPKG_OK) {
-                if (pkg_repo_linux_deb_run_prstatement(DEPS, dep->name,
-                        dep->version, package_id) != SQLITE_DONE) {
-                        ERROR_SQLITE(sqlite, pkg_repo_linux_deb_sql_prstatement(DEPS));
-                        return (EPKG_FATAL);
-                }
+//               pkg_debug(1, "name122: %s", pkg->name);
         }
-
-                pkg_debug(1, "ret: %d", ret);
-                if (ret != SQLITE_DONE) {
-                        ERROR_SQLITE(sqlite, "grmbl");
-                        goto cleanup;
-                }
-                pkg_debug(1, "AFTER");
-
 cleanup:
-        ;
-        struct pkg_dep *v, *vtmp;
-        HASH_ITER(hh, pkg->deps, v, vtmp) { 
-                 //HASH_DELETE(hh, problem->variables_by_uid, v); 
-                 pkg_debug(1, "1:%s", v->name);
-        }
+//        ;
+//        struct pkg_dep *v, *vtmp;
+//        HASH_ITER(hh, pkg->deps, v, vtmp) { 
+//                 //HASH_DELETE(hh, problem->variables_by_uid, v); 
+//                 pkg_debug(1, "1:%s", v->name);
+//        }
 
 
         return EPKG_FATAL;       
