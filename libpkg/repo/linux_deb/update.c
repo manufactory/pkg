@@ -450,9 +450,11 @@ pkg_repo_linux_deb_parse_packages(struct pkg_repo *repo, FILE *fp, sqlite3 *sqli
 
         int c = 0;
 
-        /* this loop is way too long */
-        while (fgets(buf, BUFSIZ, fp) != NULL) {
+        /* this loop is way too long ...*/
+        while (fgets(buf, 2048, fp) != NULL) { // <-- BUFSIZ too small
                 //pkg_debug(1, "WHILE");
+                //
+//                pkg_debug(1, "l: %s", buf);
 
 
                 /* packages separated by newline */
@@ -504,8 +506,8 @@ pkg_repo_linux_deb_parse_packages(struct pkg_repo *repo, FILE *fp, sqlite3 *sqli
 
                         //c++;
                         //pkg_debug(1, "c: %d", c);
-                        if (c == 10)
-                                break;
+//                        if (c == 10)
+//                                break;
 
 
                         /* create new package */
@@ -531,7 +533,7 @@ pkg_repo_linux_deb_parse_packages(struct pkg_repo *repo, FILE *fp, sqlite3 *sqli
                         pos += STRLEN("Package:");
                         pkg->name = strdup(pos);
 
-                        pkg_debug(1, "pkg->name: %s",pkg->name);
+//                        pkg_debug(1, "pkg->name: %s",pkg->name);
                         continue;
                 }
 
@@ -539,7 +541,7 @@ pkg_repo_linux_deb_parse_packages(struct pkg_repo *repo, FILE *fp, sqlite3 *sqli
                 if (pos != NULL) {
                         pos += STRLEN("Version:");
                         pkg->version = strdup(pos);
-                        pkg_debug(1, "pkg->version: %s",pkg->version);
+//                        pkg_debug(1, "pkg->version: %s",pkg->version);
                         continue;
                 }
 
@@ -547,7 +549,7 @@ pkg_repo_linux_deb_parse_packages(struct pkg_repo *repo, FILE *fp, sqlite3 *sqli
                 if (pos != NULL) {
                         pos += STRLEN("Installed-Size:");
                         pkg->flatsize = (int64_t) strtoll(pos, NULL, 10);
-                        pkg_debug(1, "pkg->is: %ld",pkg->flatsize);
+//                        pkg_debug(1, "pkg->is: %ld",pkg->flatsize);
                         continue;
                 }
 
@@ -555,7 +557,7 @@ pkg_repo_linux_deb_parse_packages(struct pkg_repo *repo, FILE *fp, sqlite3 *sqli
                 if (pos != NULL) {
                         pos += STRLEN("Size:");
                         pkg->pkgsize = (int64_t) strtoll(pos, NULL, 10);
-                        pkg_debug(1, "pkg->pkgsize: %ld",pkg->pkgsize);
+//                        pkg_debug(1, "pkg->pkgsize: %ld",pkg->pkgsize);
                         continue;
                 }
 
@@ -565,7 +567,7 @@ pkg_repo_linux_deb_parse_packages(struct pkg_repo *repo, FILE *fp, sqlite3 *sqli
                         //offset = strlen(buf) - pos - 1;
                         offset = strrchr(buf, '>') - pos;
                         pkg->maintainer = strndup(pos, offset);
-                        pkg_debug(1, "pkg->maintainer: %s",pkg->maintainer);
+//                        pkg_debug(1, "pkg->maintainer: %s",pkg->maintainer);
                         continue;
                 }
 
@@ -578,12 +580,12 @@ pkg_repo_linux_deb_parse_packages(struct pkg_repo *repo, FILE *fp, sqlite3 *sqli
                         else
                                 pkg->arch = strdup(arch);
 
-                        pkg_debug(1, "pkg->arch: %s",pkg->arch);
+//                        pkg_debug(1, "pkg->arch: %s",pkg->arch);
                         continue;
                 }
 
                 /* there is Pre-Depends too.... */
-                /*if (strncmp(buf, "Depends:", NELEM("Depends:") - 1) == 0) {
+                if (strncmp(buf, "Depends:", NELEM("Depends:") - 1) == 0) {
                         pos = strstr(buf,"Depends:"); 
                         if (pos != NULL) {
                                 pos += STRLEN("Depends:");
@@ -593,7 +595,7 @@ pkg_repo_linux_deb_parse_packages(struct pkg_repo *repo, FILE *fp, sqlite3 *sqli
                         }
 
                         continue;
-                }*/
+                }
 
                 //      pkg->version = strdup(pos);
                 //       pkg_debug(1, "pkg->version: %s",pkg->version);
@@ -603,7 +605,7 @@ pkg_repo_linux_deb_parse_packages(struct pkg_repo *repo, FILE *fp, sqlite3 *sqli
                 if (pos != NULL) {
                         pos += STRLEN("Description:");
                         pkg->comment = strdup(pos);
-                        pkg_debug(1, "pkg->comment: %s",pkg->comment);
+//                        pkg_debug(1, "pkg->comment: %s",pkg->comment);
                         continue;
                 }
 
@@ -611,7 +613,7 @@ pkg_repo_linux_deb_parse_packages(struct pkg_repo *repo, FILE *fp, sqlite3 *sqli
                 if (pos != NULL) {
                         pos += STRLEN("Homepage:");
                         pkg->www = strdup(pos);
-                        pkg_debug(1, "pkg->www: %s",pkg->www);
+//                        pkg_debug(1, "pkg->www: %s",pkg->www);
                         continue;
                 }
 
@@ -619,7 +621,7 @@ pkg_repo_linux_deb_parse_packages(struct pkg_repo *repo, FILE *fp, sqlite3 *sqli
                 if (pos != NULL) {
                         pos += STRLEN("Filename:");
                         pkg->repopath = strdup(pos);
-                        pkg_debug(1, "pkg->repopath: %s",pkg->repopath);
+//                        pkg_debug(1, "pkg->repopath: %s",pkg->repopath);
                         continue;
                 }
 
@@ -627,7 +629,7 @@ pkg_repo_linux_deb_parse_packages(struct pkg_repo *repo, FILE *fp, sqlite3 *sqli
                 if (pos != NULL) {
                         pos += STRLEN("SHA256:");
                         pkg->digest = strdup(pos);
-                        pkg_debug(1, "pkg->digest: %s",pkg->digest);
+//                        pkg_debug(1, "pkg->digest: %s",pkg->digest);
 
                         continue;
                 }
