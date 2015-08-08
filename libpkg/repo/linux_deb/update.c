@@ -77,10 +77,6 @@ pkg_repo_linux_deb_fetch_check_release_file(struct pkg_repo *repo, char *dest_pa
         snprintf(filepath, sizeof(filepath), "%s/%s-%s",
                 dbdir, pkg_repo_name(repo), DEBIAN_RELASE_FILE);
 
-        pkg_debug(1, "%s", filepath);
-        
-        // too potential memory-leaky
-        //dest_path = strdup(filepath);
         strlcpy(dest_path, filepath, sizeof(dest_path));
 
         /* delete old one, errors are ignored elsewhere, so I dare too */
@@ -140,8 +136,6 @@ pkg_repo_linux_deb_parse_relase_hash(FILE *fp, char *filename, char *hash)
         int i;
         rewind(fp);
         
-        /* look for available hashes, possible are md5, sha1, sha256 */
-
         /* For now we just look for SHA-256 hashes */
 
        /* while (feof(fp) != 0) { <-- this way we could iterate until we find
@@ -165,8 +159,7 @@ pkg_repo_linux_deb_parse_relase_hash(FILE *fp, char *filename, char *hash)
         while (fgets(buf, BUFSIZ, fp) != NULL) {
                 if (strstr(buf, filename) != NULL) {
                         /* skip spaces at beginning of line */
-                        for(i=0; isspace(buf[i]); i++)
-                                ;
+                        for(i=0; isspace(buf[i]); i++);
 
                         strlcpy(hash, &buf[i], PKG_DEBIAN_SHA256_HEX_LEN);
                         break;
@@ -198,10 +191,6 @@ pkg_repo_linux_deb_fetch_check_extract_packages(struct pkg_repo *repo, int *fd, 
         const char *abi;
         const char *distribution; /* like main, contrib, non-free, ... */
         int ret = EPKG_FATAL;
-
-        /* archive_read_extract() uses sets the fd to the extracted archive 
-         * we still need to close the old one */
-        //int fd_unextracted = -1;
 
         /* small TODO: check if size, hash has changed, take infos from existing Release file
          * if yes there's nothing to download. */
@@ -278,7 +267,6 @@ pkg_repo_linux_deb_fetch_check_extract_packages(struct pkg_repo *repo, int *fd, 
                 sizeof(packages_file_extracted));
         pkg_add_file_random_suffix(packages_file_extracted, sizeof(packages_file_extracted), 12);
         
-        //fd_unextracted = dup(*fd);
         ret = pkg_repo_util_extract_fd(*fd, packages_file,
                 packages_file_extracted);
         
@@ -289,7 +277,6 @@ pkg_repo_linux_deb_fetch_check_extract_packages(struct pkg_repo *repo, int *fd, 
 
 cleanup:
         free(fetched_hash);
-//        close(fd_unextracted);
         
         /* remove zipped original */
         (void) unlink(packages_file);
@@ -317,7 +304,6 @@ pkg_repo_linux_deb_parse_dependency(struct pkg *pkg, char *line)
 
         while((token = strsep(&line, ",")) != NULL) {
                 has_version = strrchr(token, ')');
-                
 
                 if (has_version != NULL) {
                         pos = strchr(&token[1], ' '); 
@@ -329,7 +315,7 @@ pkg_repo_linux_deb_parse_dependency(struct pkg *pkg, char *line)
                        // continue;
                 }
 
-                /* dependency appear twice.
+                /* Some dependencies appear twice.
                  * that happens when version constrains are defined like
                  * v_old <= reqired_v < v_new */
                 if (last != NULL && strcmp(name, last) == 0) {
@@ -339,7 +325,9 @@ pkg_repo_linux_deb_parse_dependency(struct pkg *pkg, char *line)
 
                 last = name;
                 
-                pkg_dep_new(&dep);
+                if (pkg_dep_new(&dep) != EPKG_OK)
+                        return EPKG_FATAL;
+
                 dep->name = name;
 
                 if (has_version == NULL)
@@ -347,20 +335,13 @@ pkg_repo_linux_deb_parse_dependency(struct pkg *pkg, char *line)
                 
                 dep->version = version;
 
-                printf("name:\"%s\"\n", dep->name);
-
-                //      alternatives = strchr(&token[len + 2], '|');
-                //      if (alternatives)
-
                 begin = strchr(&token[len + 2], ' ');
                 pos = strchr(&token[len + 2], ')') ;
                 len = pos - begin - 1;
                 dep->version = strndup(begin + 1, len);
-                printf(" version:\"%s\"\n", dep->version);
-                HASH_ADD_KEYPTR(hh, pkg->deps, dep->name, strlen(dep->name), dep);
                 
+                HASH_ADD_KEYPTR(hh, pkg->deps, dep->name, strlen(dep->name), dep);
         }
-
         return EPKG_OK;
 }
 
@@ -372,8 +353,7 @@ pkg_repo_linux_deb_parse_packages(struct pkg_repo *repo, FILE *fp, sqlite3 *sqli
         struct pkg *pkg = NULL;
         struct pkg_dep *dep = NULL;
 
-        char *pos, *pos2;
-        char *next;
+        char *pos;
 
         int offset = -1;
 
@@ -381,13 +361,8 @@ pkg_repo_linux_deb_parse_packages(struct pkg_repo *repo, FILE *fp, sqlite3 *sqli
         char arch[20] = "FreeBSD:";
         char arch_all[20] = "FreeBSD:";
         char *abi;
-        char *dver_start;
-        char *dver_end;
 
         int64_t package_id;
-        size_t len;
-
-//        size_t arch_size;
 
         /* get ABI */        
         ret = uname(&u);
@@ -414,27 +389,8 @@ pkg_repo_linux_deb_parse_packages(struct pkg_repo *repo, FILE *fp, sqlite3 *sqli
         //        pkg->prefix = strdup("/compat/linux"); // this could be done nicer
 
 
-        //strlcat(arch, abi, strlen(arch) + strlen(abi));
         snprintf(arch, sizeof(arch), "%s:%s", arch, abi);
         strlcat(arch_all, ":*", strlen(arch) + sizeof(":*"));
-
-        pkg_debug(1, "arch: %s", arch);
-        pkg_debug(1, "arch_all: %s", arch_all);
-
-        //strlcpy(&os_version, u.version, pos)        
-
-        /* logically this is just like arch[right size here] */
-
-        /* pos + */
-//        arch_size = sizeof("FreeBSD:") + sizeof(char) * ((u.version - pos) +
-//                strlen(abi));
-//        pkg_debug(1, "as: %d", arch_size);
-//        pkg_debug(1, "pos: %d", pos);
-//        pkg_debug(1, "pos: %d", u.version);
-//        arch = (char *) malloc(arch_size);
-//        snprintf(arch, arch_size, "FreeBSD:%s","f");
-
-        pkg_debug(1, "prefix: %s", pkg_repo_prefix(repo));
 
         ret = fseek(fp, 0, SEEK_SET);
 
@@ -448,31 +404,23 @@ pkg_repo_linux_deb_parse_packages(struct pkg_repo *repo, FILE *fp, sqlite3 *sqli
                 return EPKG_FATAL;
         }
 
-        int c = 0;
-
         /* this loop is way too long ...*/
         while (fgets(buf, 2048, fp) != NULL) { // <-- BUFSIZ too small
-                //pkg_debug(1, "WHILE");
-                //
-//                pkg_debug(1, "l: %s", buf);
-
 
                 /* packages separated by newline */
                 if (buf[0] == '\n') {
                         /* write last pkg to db */
 
-                        /* fill non parsed entries */
+                        /* set values not parrsed from Packages. */
                         pkg->prefix = strdup(pkg_repo_prefix(repo));
 
                         /* database code */
-                        pkg_debug(1, "BEFORE");
                         ret = pkg_repo_linux_deb_run_prstatement(PKG, pkg->name,
                                         pkg->version, pkg->comment,/* pkg->desc,*/
                                         pkg->arch, pkg->maintainer,
                                         pkg->www, pkg->prefix, pkg->pkgsize, pkg->flatsize,
                                         pkg->digest, pkg->repopath);
 
-                        pkg_debug(1, "ret: %d", ret);
                         if (ret != SQLITE_DONE) {
                                 pkg_debug(1, "pkgn: %s", pkg->name);
                                 pkg_debug(1, "pkgv: %s", pkg->version);
@@ -501,24 +449,8 @@ pkg_repo_linux_deb_parse_packages(struct pkg_repo *repo, FILE *fp, sqlite3 *sqli
                                 }
                         }
 
-                        pkg_debug(1, "AFTER");
-
-
-                        //c++;
-                        //pkg_debug(1, "c: %d", c);
-//                        if (c == 10)
-//                                break;
-
-
                         /* create new package */
 
-                        /**/
-                        /* next = fgetln(fp, &len);
-                        if (next == NULL && feof(fp)) {
-                                break; 
-                        } */
-
-                        //                        break;
                         ret = pkg_new(&pkg, PKG_REMOTE);
                         if (ret != EPKG_OK) {
                                 return EPKG_FATAL;
@@ -533,7 +465,6 @@ pkg_repo_linux_deb_parse_packages(struct pkg_repo *repo, FILE *fp, sqlite3 *sqli
                         pos += STRLEN("Package:");
                         pkg->name = strdup(pos);
 
-//                        pkg_debug(1, "pkg->name: %s",pkg->name);
                         continue;
                 }
 
@@ -633,27 +564,13 @@ pkg_repo_linux_deb_parse_packages(struct pkg_repo *repo, FILE *fp, sqlite3 *sqli
 
                         continue;
                 }
-
-                //pkg_debug(1,"pd:%s", pkg->digest);
-                //pkg_debug(1,"pn:%s",pkg->name);
-                //belongs to loop actually
-//               pkg_debug(1, "name122: %s", pkg->name);
         }
 cleanup:
-//        ;
-//        struct pkg_dep *v, *vtmp;
-//        HASH_ITER(hh, pkg->deps, v, vtmp) { 
-//                 //HASH_DELETE(hh, problem->variables_by_uid, v); 
-//                 pkg_debug(1, "1:%s", v->name);
-//        }
+        ;
 
 
         return EPKG_FATAL;       
 }
-
-
-//////////////////////
-
 
 static int
 pkg_repo_linux_deb_init_update(struct pkg_repo *repo, const char *name)
@@ -689,211 +606,6 @@ pkg_repo_linux_deb_init_update(struct pkg_repo *repo, const char *name)
 
         return (EPKG_OK);
 }
-
-//static int
-//pkg_repo_linux_deb_delete_conflicting(const char *origin, const char *version,
-//                         const char *pkg_path, bool forced)
-//{
-//        int ret = EPKG_FATAL;
-//        const char *oversion;
-//
-//        if (pkg_repo_linux_deb_run_prstatement(REPO_VERSION, origin) != SQLITE_ROW) {
-//                ret = EPKG_FATAL;
-//                goto cleanup;
-//        }
-//        oversion = sqlite3_column_text(pkg_repo_linux_deb_stmt_prstatement(REPO_VERSION), 0);
-//        if (!forced) {
-//                switch(pkg_version_cmp(oversion, version)) {
-//                case -1:
-//                        pkg_emit_error("duplicate package origin: replacing older "
-//                                        "version %s in repo with package %s for "
-//                                        "origin %s", oversion, pkg_path, origin);
-//
-//                        if (pkg_repo_linux_deb_run_prstatement(DELETE, origin, origin) !=
-//                                                        SQLITE_DONE)
-//                                ret = EPKG_FATAL;
-//                        else
-//                                ret = EPKG_OK;  /* conflict cleared */
-//
-//                        break;
-//                case 0:
-//                case 1:
-//                        pkg_emit_error("duplicate package origin: package %s is not "
-//                                        "newer than version %s already in repo for "
-//                                        "origin %s", pkg_path, oversion, origin);
-//                        ret = EPKG_END; /* keep what is already in the repo */
-//                        break;
-//                }
-//        }
-//        else {
-//                if (pkg_repo_linux_deb_run_prstatement(DELETE, origin, origin) != SQLITE_DONE)
-//                        ret = EPKG_FATAL;
-//
-//                ret = EPKG_OK;
-//        }
-//
-//cleanup:
-//        sqlite3_reset(pkg_repo_linux_deb_stmt_prstatement(REPO_VERSION));
-//
-//        return (ret);
-//}
-
-//static int
-//pkg_repo_linux_deb_add_pkg(struct pkg *pkg, const char *pkg_path,
-//                sqlite3 *sqlite, bool forced)
-//{
-//        int                      ret;
-//        struct pkg_dep          *dep      = NULL;
-//        struct pkg_option       *option   = NULL;
-//        struct pkg_shlib        *shlib    = NULL;
-//        struct pkg_provide      *provide  = NULL;
-//        struct pkg_strel        *el;
-//        struct pkg_kv           *kv;
-//        const char              *arch;
-//        int64_t                  package_id;
-//
-//        arch = pkg->abi != NULL ? pkg->abi : pkg->arch;
-//
-//try_again:
-//        if ((ret = pkg_repo_linux_deb_run_prstatement(PKG,
-//            pkg->origin, pkg->name, pkg->version, pkg->comment, pkg->desc,
-//            arch, pkg->maintainer, pkg->www, pkg->prefix, pkg->pkgsize,
-//            pkg->flatsize, (int64_t)pkg->licenselogic, pkg->sum, pkg->repopath,
-//            pkg->digest, pkg->old_digest)) != SQLITE_DONE) {
-//                if (ret == SQLITE_CONSTRAINT) {
-//                        ERROR_SQLITE(sqlite, "grmbl");
-//                        switch(pkg_repo_linux_deb_delete_conflicting(pkg->origin,
-//                            pkg->version, pkg_path, forced)) {
-//                        case EPKG_FATAL: /* sqlite error */
-//                                ERROR_SQLITE(sqlite, pkg_repo_linux_deb_sql_prstatement(PKG));
-//                                return (EPKG_FATAL);
-//                                break;
-//                        case EPKG_END: /* repo already has newer */
-//                                return (EPKG_END);
-//                                break;
-//                        default: /* conflict cleared, try again */
-//                                goto try_again;
-//                                break;
-//                        }
-//                } else {
-//                        ERROR_SQLITE(sqlite, pkg_repo_linux_deb_sql_prstatement(PKG));
-//                        return (EPKG_FATAL);
-//                }
-//        }
-//        package_id = sqlite3_last_insert_rowid(sqlite);
-//
-///*      if (pkg_repo_binary_run_prstatement (FTS_APPEND, package_id,
-//                        name, version, origin) != SQLITE_DONE) {
-//                ERROR_SQLITE(sqlite, pkg_repo_binary_sql_prstatement(FTS_APPEND));
-//                return (EPKG_FATAL);
-//        }*/
-//
-//        dep = NULL;
-//        while (pkg_deps(pkg, &dep) == EPKG_OK) {
-//                if (pkg_repo_linux_deb_run_prstatement(DEPS, dep->origin,
-//                    dep->name, dep->version, package_id) != SQLITE_DONE) {
-//                        ERROR_SQLITE(sqlite, pkg_repo_linux_deb_sql_prstatement(DEPS));
-//                        return (EPKG_FATAL);
-//                }
-//        }
-//
-//        LL_FOREACH(pkg->categories, el) {
-//                ret = pkg_repo_linux_deb_run_prstatement(CAT1, el->value);
-//                if (ret == SQLITE_DONE)
-//                        ret = pkg_repo_linux_deb_run_prstatement(CAT2, package_id,
-//                            el->value);
-//                if (ret != SQLITE_DONE) {
-//                        ERROR_SQLITE(sqlite, pkg_repo_linux_deb_sql_prstatement(CAT2));
-//                        return (EPKG_FATAL);
-//                }
-//        }
-//
-//        LL_FOREACH(pkg->licenses, el) {
-//                ret = pkg_repo_linux_deb_run_prstatement(LIC1, el->value);
-//                if (ret == SQLITE_DONE)
-//                        ret = pkg_repo_linux_deb_run_prstatement(LIC2, package_id,
-//                            el->value);
-//                if (ret != SQLITE_DONE) {
-//                        ERROR_SQLITE(sqlite, pkg_repo_linux_deb_sql_prstatement(LIC2));
-//                        return (EPKG_FATAL);
-//                }
-//        }
-//
-//        option = NULL;
-//        while (pkg_options(pkg, &option) == EPKG_OK) {
-//                ret = pkg_repo_linux_deb_run_prstatement(OPT1, option->key);
-//                if (ret == SQLITE_DONE)
-//                    ret = pkg_repo_linux_deb_run_prstatement(OPT2, option->key,
-//                                option->value, package_id);
-//                if(ret != SQLITE_DONE) {
-//                        ERROR_SQLITE(sqlite, pkg_repo_linux_deb_sql_prstatement(OPT2));
-//                        return (EPKG_FATAL);
-//                }
-//        }
-//
-//        shlib = NULL;
-//        while (pkg_shlibs_required(pkg, &shlib) == EPKG_OK) {
-//                ret = pkg_repo_linux_deb_run_prstatement(SHLIB1, shlib->name);
-//                if (ret == SQLITE_DONE)
-//                        ret = pkg_repo_linux_deb_run_prstatement(SHLIB_REQD, package_id,
-//                                        shlib->name);
-//                if (ret != SQLITE_DONE) {
-//                        ERROR_SQLITE(sqlite, pkg_repo_linux_deb_sql_prstatement(SHLIB_REQD));
-//                        return (EPKG_FATAL);
-//                }
-//        }
-//
-//        shlib = NULL;
-//        while (pkg_shlibs_provided(pkg, &shlib) == EPKG_OK) {
-//                ret = pkg_repo_linux_deb_run_prstatement(SHLIB1, shlib->name);
-//                if (ret == SQLITE_DONE)
-//                        ret = pkg_repo_linux_deb_run_prstatement(SHLIB_PROV, package_id,
-//                                        shlib->name);
-//                if (ret != SQLITE_DONE) {
-//                        ERROR_SQLITE(sqlite, pkg_repo_linux_deb_sql_prstatement(SHLIB_PROV));
-//                        return (EPKG_FATAL);
-//                }
-//        }
-//
-//        provide = NULL;
-//        while (pkg_provides(pkg, &provide) == EPKG_OK) {
-//                ret = pkg_repo_linux_deb_run_prstatement(PROVIDE, provide->provide);
-//                if (ret == SQLITE_DONE)
-//                        ret = pkg_repo_linux_deb_run_prstatement(PROVIDES, package_id,
-//                            provide->provide);
-//                if (ret != SQLITE_DONE) {
-//                        ERROR_SQLITE(sqlite, pkg_repo_linux_deb_sql_prstatement(PROVIDES));
-//                        return (EPKG_FATAL);
-//                }
-//        }
-//
-//        provide = NULL;
-//        while (pkg_requires(pkg, &provide) == EPKG_OK) {
-//                ret = pkg_repo_linux_deb_run_prstatement(REQUIRE, provide->provide);
-//                if (ret == SQLITE_DONE)
-//                        ret = pkg_repo_linux_deb_run_prstatement(REQUIRES, package_id,
-//                            provide->provide);
-//                if (ret != SQLITE_DONE) {
-//                        ERROR_SQLITE(sqlite, pkg_repo_linux_deb_sql_prstatement(REQUIRES));
-//                        return (EPKG_FATAL);
-//                }
-//        }
-//
-//        LL_FOREACH(pkg->annotations, kv) {
-//                ret = pkg_repo_linux_deb_run_prstatement(ANNOTATE1, kv->key);
-//                if (ret == SQLITE_DONE)
-//                        ret = pkg_repo_linux_deb_run_prstatement(ANNOTATE1, kv->value);
-//                if (ret == SQLITE_DONE)
-//                        ret = pkg_repo_linux_deb_run_prstatement(ANNOTATE2, package_id,
-//                                  kv->key, kv->value);
-//                if (ret != SQLITE_DONE) {
-//                        ERROR_SQLITE(sqlite, pkg_repo_linux_deb_sql_prstatement(ANNOTATE2));
-//                        return (EPKG_FATAL);
-//                }
-//        }
-//
-//        return (EPKG_OK);
-//}
 
 static int
 pkg_repo_linux_deb_register_conflicts(const char *origin, char **conflicts,
@@ -986,44 +698,6 @@ pkg_repo_linux_deb_register_conflicts(const char *origin, char **conflicts,
         return (EPKG_OK);
 }
 
-/*static int
-pkg_repo_linux_deb_add_from_manifest(char *buf, sqlite3 *sqlite, size_t len,
-                struct pkg_manifest_key **keys, struct pkg **p __unused,
-                struct pkg_repo *repo)
-{
-        int rc = EPKG_OK;
-        struct pkg *pkg;
-
-        rc = pkg_new(&pkg, PKG_REMOTE);
-        if (rc != EPKG_OK)
-                return (EPKG_FATAL);
-
-        pkg_manifest_keys_new(keys);
-        rc = pkg_parse_manifest(pkg, buf, len, *keys);
-        if (rc != EPKG_OK) {
-                goto cleanup;
-        }
-
-        if (pkg->digest == NULL || !pkg_checksum_is_valid(pkg->digest, strlen(pkg->digest)))
-                pkg_checksum_calculate(pkg, NULL);
-        if (pkg->arch == NULL || !is_valid_abi(pkg->arch, true)) {
-                rc = EPKG_FATAL;
-                pkg_emit_error("repository %s contains packages with wrong ABI: %s",
-                        repo->name, pkg->arch);
-                goto cleanup;
-        }
-
-        free(pkg->reponame);
-        pkg->reponame = strdup(repo->name);
-
-        rc = pkg_repo_linux_deb_add_pkg(pkg, NULL, sqlite, true);
-
-cleanup:
-        pkg_free(pkg);
-
-        return (rc);
-}*/
-
 static void __unused
 pkg_repo_linux_deb_parse_conflicts(FILE *f, sqlite3 *sqlite)
 {
@@ -1064,14 +738,10 @@ static int
 pkg_repo_linux_deb_update_proceed(const char *name, struct pkg_repo *repo,
         time_t *mtime, bool force)
 {
-//        struct pkg *pkg = NULL;
         int rc = EPKG_FATAL;
         sqlite3 *sqlite = NULL;
-        //time_t local_t;
-        //bool in_trans = false;
 
         char tmp[MAXPATHLEN];
-        //int fd = -1;
 
         char release_path[MAXPATHLEN];
         FILE *release_fp;
@@ -1096,7 +766,6 @@ pkg_repo_linux_deb_update_proceed(const char *name, struct pkg_repo *repo,
         pkg_repo_linux_deb_fetch_check_release_file(repo, release_path);
 
         snprintf(release_path, sizeof(release_path), "%s", "/var/db/pkg/Debian-Release");
-        pkg_debug(1, "rrrp: %s", release_path);
 
         release_fp = fopen(release_path, "r");
 
@@ -1105,32 +774,22 @@ pkg_repo_linux_deb_update_proceed(const char *name, struct pkg_repo *repo,
                 return EPKG_FATAL;
         }
         
-        //rc = pkg_repo_linux_deb_fetch_check_extract_packages(repo, &packages_fd, release_fp);
-
-//        if (rc != EPKG_OK) {
-//                goto cleanup;
-//        }
-
         packages_fd = open("/tmp/Packages", O_RDONLY);
 
         packages_fp = fdopen(packages_fd, "r");
-
-        pkg_debug(1, "fuck");
 
         if (packages_fp == NULL) {
                 pkg_emit_errno("fdopen", "");
                 goto cleanup;
         }
-        pkg_debug(1, "fuck2");
 
-/* stolen code that can stay */
-      /* Load local repository data */
+        /* stolen code that can stay */
+        /* Load local repository data */
       rc = pkg_repo_linux_deb_init_update(repo, name);
       if (rc != EPKG_OK) {
               rc = EPKG_FATAL;
               goto cleanup;
       }
-
 
 //      /* Here sqlite is initialized */
       sqlite = PRIV_GET(repo);
@@ -1149,32 +808,19 @@ pkg_repo_linux_deb_update_proceed(const char *name, struct pkg_repo *repo,
 
       in_trans = true;
 
-        pkg_repo_linux_deb_parse_packages(repo, packages_fp, sqlite);
-
-
-        // rc = pkg_repo_linux_deb_parse_packages(sqlite3 *sqlite, packages_fp);
-
-
-/* stolen code, that can stay: */
+      pkg_repo_linux_deb_parse_packages(repo, packages_fp, sqlite);
 
       sql_exec(sqlite, ""
-//       "INSERT INTO pkg_search SELECT id, name || '-' || version, origin FROM packages;"
-//      "CREATE INDEX packages_origin ON packages(origin COLLATE NOCASE);"
       "CREATE INDEX packages_name ON packages(name COLLATE NOCASE);"
-//      "CREATE INDEX packages_uid_nocase ON packages(name COLLATE NOCASE, origin COLLATE NOCASE);"
       "CREATE INDEX packages_version_nocase ON packages(name COLLATE NOCASE, version);"
-//      "CREATE INDEX packages_uid ON packages(name, origin);"
       "CREATE INDEX packages_version ON packages(name, version);"
-//      "CREATE UNIQUE INDEX packages_digest ON packages(manifestdigest);"
        );
 cleanup:
         close(packages_fd);
-        pkg_debug(1, "fuck3");
  
         /* errors could have happened before, packages_fp is set */
         if (packages_fp != NULL)
                 fclose(packages_fp);
-        pkg_debug(1, "fuck the hell");
 
       if (in_trans) {
               pkg_debug(1, "in trans");
@@ -1250,7 +896,6 @@ pkg_repo_linux_deb_update(struct pkg_repo *repo, bool force)
 
         /* Finish updated repo */
         if (res == EPKG_OK) {
-                // just commented out not to trigger the assert
                 sqlite = PRIV_GET(repo);
                 sql_exec(sqlite, update_finish_sql);
         }
