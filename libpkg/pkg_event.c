@@ -158,7 +158,9 @@ pipeevent(struct pkg_event *ev)
 		    "}}",
 		    ev->e_install_finished.pkg,
 		    ev->e_install_finished.pkg,
-		    sbuf_json_escape(buf, ev->e_install_finished.pkg->message));
+			ev->e_install_finished.pkg->message ?
+				sbuf_json_escape(buf, ev->e_install_finished.pkg->message->str) :
+				"");
 		break;
 	case PKG_EVENT_INTEGRITYCHECK_BEGIN:
 		sbuf_printf(msg, "{ \"type\": \"INFO_INTEGRITYCHECK_BEGIN\", "
@@ -537,13 +539,14 @@ pkg_emit_install_begin(struct pkg *p)
 }
 
 void
-pkg_emit_install_finished(struct pkg *p)
+pkg_emit_install_finished(struct pkg *p, struct pkg *old)
 {
 	struct pkg_event ev;
 	bool syslog_enabled = false;
 
 	ev.type = PKG_EVENT_INSTALL_FINISHED;
 	ev.e_install_finished.pkg = p;
+	ev.e_install_finished.old = old;
 
 	syslog_enabled = pkg_object_bool(pkg_config_get("SYSLOG"));
 	if (syslog_enabled) {
@@ -1000,4 +1003,14 @@ pkg_emit_progress_tick(int64_t current, int64_t total)
 
 	pkg_emit_event(&ev);
 
+}
+
+void
+pkg_emit_new_action(void)
+{
+	struct pkg_event ev;
+
+	ev.type = PKG_EVENT_NEW_ACTION;
+
+	pkg_emit_event(&ev);
 }

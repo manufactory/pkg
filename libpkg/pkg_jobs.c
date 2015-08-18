@@ -58,13 +58,12 @@
 #include <sys/statvfs.h>
 #endif
 
-#include "utarray.h"
-
 #include "pkg.h"
 #include "private/event.h"
 #include "private/pkg.h"
 #include "private/pkgdb.h"
 #include "private/pkg_jobs.h"
+#include "kvec.h"
 
 static int pkg_jobs_find_upgrade(struct pkg_jobs *j, const char *pattern, match_t m);
 static int pkg_jobs_fetch(struct pkg_jobs *j);
@@ -357,7 +356,11 @@ pkg_jobs_add_req(struct pkg_jobs *j, struct pkg *pkg)
 		head = &j->request_delete;
 		assert(pkg->type == PKG_INSTALLED);
 	}
+
+	pkg_debug(4, "universe: add package %s-%s to the request", pkg->name,
+			pkg->version);
 	rc = pkg_jobs_universe_add_pkg(j->universe, pkg, false, &un);
+
 	if (rc == EPKG_END) {
 		/*
 		 * This means that we have a package in the universe with the same
@@ -436,72 +439,68 @@ pkg_jobs_process_add_request(struct pkg_jobs *j)
 	struct pkg_dep *d;
 	struct pkg *lp;
 	int (*deps_func)(const struct pkg *pkg, struct pkg_dep **d);
-	UT_array *to_process = NULL;
+	kvec_t(struct pkg_job_universe_item *) to_process;
 
-	if (upgrade || reverse) {
-		utarray_new(to_process, &ut_ptr_icd);
+	if (!upgrade && !reverse)
+		return;
 
-		HASH_ITER(hh, j->request_add, req, tmp) {
-			it = req->item;
+	kv_init(to_process);
+	HASH_ITER(hh, j->request_add, req, tmp) {
+		it = req->item;
 
-			if (reverse)
-				deps_func = pkg_rdeps;
-			else
-				deps_func = pkg_deps;
+		if (reverse)
+			deps_func = pkg_rdeps;
+		else
+			deps_func = pkg_deps;
 
-			d = NULL;
+		d = NULL;
+		/*
+		 * Here we get deps of local packages only since we are pretty sure
+		 * that they are completely expanded
+		 */
+		lp = pkg_jobs_universe_get_local(j->universe,
+		    it->pkg->uid, 0);
+		while (lp != NULL && deps_func(lp, &d) == EPKG_OK) {
 			/*
-			 * Here we get deps of local packages only since we are pretty sure
-			 * that they are completely expanded
+			 * Do not add duplicated upgrade candidates
 			 */
+			HASH_FIND_STR(j->request_add, d->uid, found);
+			if (found != NULL)
+				continue;
+
+			pkg_debug(4, "adding dependency %s to request", d->uid);
 			lp = pkg_jobs_universe_get_local(j->universe,
-			    it->pkg->uid, 0);
-			while (lp != NULL && deps_func(lp, &d) == EPKG_OK) {
-				/*
-				 * Do not add duplicated upgrade candidates
-				 */
-				HASH_FIND_STR(j->request_add, d->uid, found);
-				if (found != NULL)
-					continue;
+				d->uid, 0);
+			/*
+			 * Here we need to check whether specific remote package
+			 * is newer than a local one
+			 */
+			un = pkg_jobs_universe_get_upgrade_candidates(j->universe,
+				d->uid, lp, force);
+			if (un == NULL)
+				continue;
 
-				pkg_debug(4, "adding dependency %s to request", d->uid);
-				lp = pkg_jobs_universe_get_local(j->universe,
-					d->uid, 0);
-				/*
-				 * Here we need to check whether specific remote package
-				 * is newer than a local one
-				 */
-				un = pkg_jobs_universe_get_upgrade_candidates(j->universe,
-					d->uid, lp, force);
-				if (un == NULL)
-					continue;
-
-				cur = un->prev;
-				while (cur != un) {
-					if (cur->pkg->type != PKG_INSTALLED) {
-						utarray_push_back(to_process, &un);
-						break;
-					}
-					cur = cur->prev;
+			cur = un->prev;
+			while (cur != un) {
+				if (cur->pkg->type != PKG_INSTALLED) {
+					kv_push(typeof(un), to_process, un);
+					break;
 				}
+				cur = cur->prev;
 			}
 		}
 	}
 
-	if (to_process) {
-		/* Add all items to the request */
-		struct pkg_job_universe_item **pun = NULL;
-
-		if (to_process->n > 0) {
-			while ((pun = (struct pkg_job_universe_item **)
-							utarray_next(to_process, pun)) != NULL) {
-				pkg_jobs_add_req_from_universe(&j->request_add, *pun, false, true);
-			}
-			/* Now recursively process all items checked */
-			pkg_jobs_process_add_request(j);
-		}
-		utarray_free(to_process);
+	/* Add all items to the request */
+	for (int i = 0; i < kv_size(to_process); i++) {
+		un = kv_A(to_process, i);
+		pkg_jobs_add_req_from_universe(&j->request_add, un, false, true);
 	}
+	/* Now recursively process all items checked */
+	if (kv_size(to_process) > 0)
+		pkg_jobs_process_add_request(j);
+
+	kv_destroy(to_process);
 }
 
 /*
@@ -513,54 +512,50 @@ pkg_jobs_process_delete_request(struct pkg_jobs *j)
 	bool force = j->flags & PKG_FLAG_FORCE;
 	struct pkg_job_request *req, *tmp, *found;
 	struct pkg_dep *d = NULL;
-	UT_array *to_process = NULL;
 	struct pkg *lp;
 	int rc = EPKG_OK;
+	kvec_t(struct pkg *) to_process;
 
-	if (!force) {
-		/*
-		 * Need to add also all reverse deps here
-		 */
-		utarray_new(to_process, &ut_ptr_icd);
-		HASH_ITER(hh, j->request_delete, req, tmp) {
-			d = NULL;
-			while (pkg_rdeps(req->item->pkg, &d) == EPKG_OK) {
-				HASH_FIND_STR(j->request_delete, d->uid, found);
-				if (found)
-					continue;
+	if (force)
+		return (EPKG_OK);
 
-				lp = pkg_jobs_universe_get_local(j->universe, d->uid, 0);
-				if (lp) {
-					if (lp->locked) {
-						pkg_emit_error("%s is locked, "
-						   "cannot delete %s", lp->name,
-						   req->item->pkg->name);
-						rc = EPKG_FATAL;
-					}
-					utarray_push_back(to_process, &lp);
+	kv_init(to_process);
+	/*
+	 * Need to add also all reverse deps here
+	 */
+	HASH_ITER(hh, j->request_delete, req, tmp) {
+		d = NULL;
+		while (pkg_rdeps(req->item->pkg, &d) == EPKG_OK) {
+			HASH_FIND_STR(j->request_delete, d->uid, found);
+			if (found)
+				continue;
+
+			lp = pkg_jobs_universe_get_local(j->universe, d->uid, 0);
+			if (lp) {
+				if (lp->locked) {
+					pkg_emit_error("%s is locked, "
+					    "cannot delete %s", lp->name,
+					   req->item->pkg->name);
+					rc = EPKG_FATAL;
 				}
+				kv_push(typeof(lp), to_process, lp);
 			}
 		}
 	}
 
-	if (to_process) {
-		/* Add all items to the request */
-		struct pkg **ppkg = NULL;
+	if (rc == EPKG_FATAL)
+		return (rc);
 
-		if (to_process->n > 0 && rc != EPKG_FATAL) {
-			while ((ppkg = (struct pkg **)
-							utarray_next(to_process, ppkg)) != NULL) {
-
-				if (pkg_jobs_add_req(j, *ppkg) == NULL) {
-					utarray_free(to_process);
-					return (EPKG_FATAL);
-				}
-			}
-			/* Now recursively process all items checked */
-			rc = pkg_jobs_process_delete_request(j);
+	for (int i = 0; i < kv_size(to_process); i++) {
+		lp = kv_A(to_process, i);
+		if (pkg_jobs_add_req(j, lp) == NULL) {
+			kv_destroy(to_process);
+			return (EPKG_FATAL);
 		}
-		utarray_free(to_process);
 	}
+	if (kv_size(to_process) > 0)
+		rc = pkg_jobs_process_delete_request(j);
+	kv_destroy(to_process);
 
 	return (rc);
 }
@@ -593,7 +588,7 @@ pkg_jobs_set_execute_priority(struct pkg_jobs *j, struct pkg_solved *solved)
 			ts->type = PKG_SOLVED_UPGRADE_REMOVE;
 			ts->items[0] = solved->items[1];
 			solved->items[1] = NULL;
-			solved->type = PKG_SOLVED_INSTALL;
+			solved->type = PKG_SOLVED_UPGRADE_INSTALL;
 			DL_APPEND(j->jobs, ts);
 			j->count ++;
 			solved->already_deleted = true;
@@ -812,7 +807,7 @@ pkg_jobs_try_remote_candidate(struct pkg_jobs *j, const char *pattern,
 		sbuf_finish(qmsg);
 		if (pkg_emit_query_yesno(true, sbuf_data(qmsg))) {
 			/* Change the origin of the local package */
-			pkg_validate(p);
+			pkg_validate(p, j->db);
 			unit = pkg_jobs_universe_find(j->universe, uid);
 			if (unit != NULL)
 				pkg_jobs_universe_change_uid(j->universe, unit, p->uid,
@@ -1003,7 +998,7 @@ pkg_jobs_find_remote_pattern(struct pkg_jobs *j, struct job_pattern *jp)
 		pkg_manifest_keys_new(&keys);
 		if (pkg_open(&pkg, jp->path, keys, PKG_OPEN_MANIFEST_ONLY) != EPKG_OK) {
 			rc = EPKG_FATAL;
-		} else if (pkg_validate(pkg) == EPKG_OK) {
+		} else if (pkg_validate(pkg, j->db) == EPKG_OK) {
 			if (j->type == PKG_JOBS_UPGRADE) {
 				jfp.match = MATCH_EXACT;
 				jfp.pattern = pkg->name;
@@ -1038,9 +1033,8 @@ pkg_jobs_need_upgrade(struct pkg *rp, struct pkg *lp)
 	int ret, ret1, ret2;
 	struct pkg_option *lo = NULL, *ro = NULL;
 	struct pkg_dep *ld = NULL, *rd = NULL;
-	struct pkg_shlib *ls = NULL, *rs = NULL;
 	struct pkg_conflict *lc = NULL, *rc = NULL;
-	struct pkg_provide *lpr = NULL, *rpr = NULL;
+	char *lb, *rb;
 
 	/* If no local package, then rp is obviously need to be added */
 	if (lp == NULL)
@@ -1159,16 +1153,17 @@ pkg_jobs_need_upgrade(struct pkg *rp, struct pkg *lp)
 	}
 
 	/* Provides */
+	lb = rb = NULL;
 	for (;;) {
-		ret1 = pkg_provides(rp, &rpr);
-		ret2 = pkg_provides(lp, &lpr);
+		ret1 = pkg_provides(rp, &rb);
+		ret2 = pkg_provides(lp, &lb);
 		if (ret1 != ret2) {
 			free(rp->reason);
 			rp->reason = strdup("provides changed");
 			return (true);
 		}
 		if (ret1 == EPKG_OK) {
-			if (strcmp(rpr->provide, lpr->provide) != 0) {
+			if (strcmp(rb, lb) != 0) {
 				free(rp->reason);
 				rp->reason = strdup("provides changed");
 				return (true);
@@ -1178,18 +1173,17 @@ pkg_jobs_need_upgrade(struct pkg *rp, struct pkg *lp)
 			break;
 	}
 	/* Requires */
-	rpr = NULL;
-	lpr = NULL;
+	lb = rb = NULL;
 	for (;;) {
-		ret1 = pkg_requires(rp, &rpr);
-		ret1 = pkg_requires(lp, &lpr);
+		ret1 = pkg_requires(rp, &rb);
+		ret1 = pkg_requires(lp, &lb);
 		if (ret1 != ret2) {
 			free(rp->reason);
 			rp->reason = strdup("requires changed");
 			return (true);
 		}
 		if (ret1 == EPKG_OK) {
-			if (strcmp(rpr->provide, lpr->provide) != 0) {
+			if (strcmp(rb, lb) != 0) {
 				free(rp->reason);
 				rp->reason = strdup("requires changed");
 				return (true);
@@ -1200,20 +1194,21 @@ pkg_jobs_need_upgrade(struct pkg *rp, struct pkg *lp)
 	}
 
 	/* Finish by the shlibs */
+	lb = rb = NULL;
 	for (;;) {
-		ret1 = pkg_shlibs_provided(rp, &rs);
-		ret2 = pkg_shlibs_provided(lp, &ls);
+		ret1 = pkg_shlibs_provided(rp, &rb);
+		ret2 = pkg_shlibs_provided(lp, &lb);
 		if (ret1 != ret2) {
 			free(rp->reason);
 			rp->reason = strdup("provided shared library changed");
 			return (true);
 		}
 		if (ret1 == EPKG_OK) {
-			if (strcmp(rs->name, ls->name) != 0) {
+			if (strcmp(rb, lb) != 0) {
 				free(rp->reason);
 				rp->reason = strdup("provided shared library changed");
 				pkg_debug(1, "provided shlib changed %s -> %s",
-				    ls->name, rs->name);
+				    lb, rb);
 				return (true);
 			}
 		}
@@ -1221,20 +1216,21 @@ pkg_jobs_need_upgrade(struct pkg *rp, struct pkg *lp)
 			break;
 	}
 
+	lb = rb = NULL;
 	for (;;) {
-		ret1 = pkg_shlibs_required(rp, &rs);
-		ret2 = pkg_shlibs_required(lp, &ls);
+		ret1 = pkg_shlibs_required(rp, &rb);
+		ret2 = pkg_shlibs_required(lp, &lb);
 		if (ret1 != ret2) {
 			free(rp->reason);
 			rp->reason = strdup("needed shared library changed");
 			return (true);
 		}
 		if (ret1 == EPKG_OK) {
-			if (strcmp(rs->name, ls->name) != 0) {
+			if (strcmp(rb, lb) != 0) {
 				free(rp->reason);
 				rp->reason = strdup("needed shared library changed");
 				pkg_debug(1, "Required shlib changed %s -> %s",
-				    ls->name, rs->name);
+				    lb, rb);
 				return (true);
 			}
 		}
@@ -1574,7 +1570,10 @@ jobs_solve_install_upgrade(struct pkg_jobs *j)
 		}
 	}
 
+#if 0
+	/* XXX: check if we can safely remove this function */
 	pkg_jobs_process_add_request(j);
+#endif
 	if (pkg_conflicts_request_resolve(j) != EPKG_OK) {
 		pkg_emit_error("Cannot resolve conflicts in a request");
 		return (EPKG_FATAL);
@@ -1866,6 +1865,8 @@ pkg_jobs_handle_install(struct pkg_solved *ps, struct pkg_jobs *j,
 	if ((j->flags & PKG_FLAG_FORCE_MISSING) == PKG_FLAG_FORCE_MISSING)
 		flags |= PKG_ADD_FORCE_MISSING;
 	flags |= PKG_ADD_UPGRADE;
+	if (ps->type == PKG_SOLVED_UPGRADE_INSTALL)
+		flags |= PKG_ADD_SPLITTED_UPGRADE;
 	if (new->automatic || (j->flags & PKG_FLAG_AUTOMATIC) == PKG_FLAG_AUTOMATIC)
 		flags |= PKG_ADD_AUTOMATIC;
 
@@ -1946,6 +1947,7 @@ pkg_jobs_execute(struct pkg_jobs *j)
 				goto cleanup;
 			break;
 		case PKG_SOLVED_INSTALL:
+		case PKG_SOLVED_UPGRADE_INSTALL:
 			retcode = pkg_jobs_handle_install(ps, j, keys);
 			if (retcode != EPKG_OK)
 				goto cleanup;

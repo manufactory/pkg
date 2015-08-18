@@ -107,13 +107,13 @@ static struct column_mapping {
 static int
 pkg_addcategory(struct pkg *pkg, const char *data)
 {
-	return (pkg_strel_add(&pkg->categories, data, "category"));
+	return (pkg_addstring(&pkg->categories, data, "category"));
 }
 
 static int
 pkg_addlicense(struct pkg *pkg, const char *data)
 {
-	return (pkg_strel_add(&pkg->licenses, data, "license"));
+	return (pkg_addstring(&pkg->licenses, data, "license"));
 }
 
 static int
@@ -537,8 +537,6 @@ pkgdb_load_category(sqlite3 *sqlite, struct pkg *pkg)
 static int
 pkgdb_load_user(sqlite3 *sqlite, struct pkg *pkg)
 {
-	/*struct pkg_user *u = NULL;
-	struct passwd *pwd = NULL;*/
 	int		ret;
 	const char	sql[] = ""
 		"SELECT users.name"
@@ -553,22 +551,12 @@ pkgdb_load_user(sqlite3 *sqlite, struct pkg *pkg)
 	ret = load_val(sqlite, pkg, sql, PKG_LOAD_USERS,
 	    pkg_adduser, PKG_USERS);
 
-	/* TODO get user uidstr from local database */
-/*	while (pkg_users(pkg, &u) == EPKG_OK) {
-		pwd = getpwnam(u->name);
-		if (pwd == NULL)
-			continue;
-		strlcpy(u->uidstr, pw_make(pwd), sizeof(u->uidstr));
-	}*/
-
 	return (ret);
 }
 
 static int
 pkgdb_load_group(sqlite3 *sqlite, struct pkg *pkg)
 {
-	struct pkg_group	*g = NULL;
-	struct group		*grp = NULL;
 	int			 ret;
 	const char		 sql[] = ""
 		"SELECT groups.name"
@@ -582,13 +570,6 @@ pkgdb_load_group(sqlite3 *sqlite, struct pkg *pkg)
 
 	ret = load_val(sqlite, pkg, sql, PKG_LOAD_GROUPS,
 	    pkg_addgroup, PKG_GROUPS);
-
-	while (pkg_groups(pkg, &g) == EPKG_OK) {
-		grp = getgrnam(g->name);
-		if (grp == NULL)
-			continue;
-		strlcpy(g->gidstr, gr_make(grp), sizeof(g->gidstr));
-	}
 
 	return (ret);
 }
@@ -795,7 +776,7 @@ pkgdb_load_requires(sqlite3 *sqlite, struct pkg *pkg)
 static void
 populate_pkg(sqlite3_stmt *stmt, struct pkg *pkg) {
 	int		 icol = 0;
-	const char	*colname;
+	const char	*colname, *msg;
 	char		 legacyarch[BUFSIZ];
 
 	assert(stmt != NULL);
@@ -835,7 +816,20 @@ populate_pkg(sqlite3_stmt *stmt, struct pkg *pkg) {
 				pkg->digest = strdup(sqlite3_column_text(stmt, icol));
 				break;
 			case PKG_MESSAGE:
-				pkg->message = strdup(sqlite3_column_text(stmt, icol));
+				msg = sqlite3_column_text(stmt, icol);
+				if (msg) {
+					/* A stupid logic to detect legacy pkg message */
+					if (msg[0] == '{') {
+						pkg_message_from_str(pkg, msg, 0);
+					}
+					else {
+						pkg->message = calloc(1, sizeof(*pkg->message));
+						pkg->message->str = strdup(msg);
+					}
+				}
+				else {
+					pkg->message = NULL;
+				}
 				break;
 			case PKG_NAME:
 				pkg->name = strdup(sqlite3_column_text(stmt, icol));

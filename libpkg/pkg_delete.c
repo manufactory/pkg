@@ -67,8 +67,10 @@ pkg_delete(struct pkg *pkg, struct pkgdb *db, unsigned flags)
 	if (pkgdb_ensure_loaded(db, pkg, load_flags) != EPKG_OK)
 		return (EPKG_FATAL);
 
-	if ((flags & PKG_DELETE_UPGRADE) == 0)
+	if ((flags & PKG_DELETE_UPGRADE) == 0) {
+		pkg_emit_new_action();
 		pkg_emit_deinstall_begin(pkg);
+	}
 
 	/* If the package is locked */
 	if (pkg->locked) {
@@ -327,7 +329,7 @@ pkg_delete_files(struct pkg *pkg, unsigned force)
 
 	int		nfiles, cur_file = 0;
 
-	nfiles = HASH_COUNT(pkg->files);
+	nfiles = kh_count(pkg->files);
 
 	if (nfiles == 0)
 		return (EPKG_OK);
@@ -381,14 +383,11 @@ int
 pkg_delete_dirs(__unused struct pkgdb *db, struct pkg *pkg, struct pkg *new)
 {
 	struct pkg_dir	*dir = NULL;
-	struct pkg_dir	*d;
 
 	while (pkg_dirs(pkg, &dir) == EPKG_OK) {
-		d = NULL;
-		if (new != NULL)
-			HASH_FIND_STR(new->dirs, dir->path, d);
-		if (d == NULL)
-			pkg_delete_dir(pkg, dir);
+		if (new != NULL && !pkg_has_dir(new, dir->path))
+			continue;
+		pkg_delete_dir(pkg, dir);
 	}
 
 	pkg_effective_rmdir(db, pkg);

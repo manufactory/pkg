@@ -76,7 +76,6 @@
  * Fu pkg_file     User owner of file 
  *
  * G  pkg          List of groups
- * Gg pkg_group    gidstr (parse this using gr_scan()?)
  * Gn pkg_group    Group name
  *
  * H
@@ -108,7 +107,6 @@
  *
  * U  pkg          List of users
  * Un pkg_user     User name
- * Uu pkg_user     uidstr (parse this using pw_scan()?)
  *
  * V  pkg          old version
  * W
@@ -342,15 +340,6 @@ static const struct pkg_printf_fmt	fmt[] = {
 		PP_PKG,
 		&format_files,
 	},
-	[PP_PKG_GROUP_GIDSTR] =
-	{
-		'G',
-		'g',
-		false,
-		false,
-		PP_PKG|PP_G,
-		&format_group_gidstr,
-	},
 	[PP_PKG_GROUP_NAME] =
 	{
 		'G',
@@ -485,15 +474,6 @@ static const struct pkg_printf_fmt	fmt[] = {
 		false,
 		PP_PKG|PP_U,
 		&format_user_name,
-	},
-	[PP_PKG_USER_UIDSTR] =
-	{
-		'U',
-		'u',
-		false,
-		false,
-		PP_PKG|PP_U,
-		&format_user_uidstr,
 	},
 	[PP_PKG_USERS] =
 	{
@@ -912,19 +892,19 @@ format_shlibs_required(struct sbuf *sbuf, const void *data, struct percent_esc *
 	if (p->flags & (PP_ALTERNATE_FORM1|PP_ALTERNATE_FORM2))
 		return (list_count(sbuf, pkg_list_count(pkg, PKG_SHLIBS_REQUIRED), p));
 	else {
-		struct pkg_shlib	*shlib = NULL;
+		char	*buf = NULL;
 		int			 count;
 
 		set_list_defaults(p, "%Bn\n", "");
 
 		count = 1;
-		while (pkg_shlibs_required(pkg, &shlib) == EPKG_OK) {
+		while (pkg_shlibs_required(pkg, &buf) == EPKG_OK) {
 			if (count > 1)
 				iterate_item(sbuf, pkg, sbuf_data(p->sep_fmt),
-					     shlib, count, PP_B);
+					     buf, count, PP_B);
 
 			iterate_item(sbuf, pkg, sbuf_data(p->item_fmt),
-				     shlib, count, PP_B);
+				     buf, count, PP_B);
 			count++;
 		}
 	}
@@ -938,9 +918,9 @@ format_shlibs_required(struct sbuf *sbuf, const void *data, struct percent_esc *
 struct sbuf *
 format_shlib_name(struct sbuf *sbuf, const void *data, struct percent_esc *p)
 {
-	const struct pkg_shlib	*shlib = data;
+	const char	*shlib = data;
 
-	return (string_val(sbuf, shlib->name, p));
+	return (string_val(sbuf, shlib, p));
 }
 
 /*
@@ -953,25 +933,24 @@ struct sbuf *
 format_categories(struct sbuf *sbuf, const void *data, struct percent_esc *p)
 {
 	const struct pkg	*pkg = data;
-	struct pkg_strel	*el;
 	int			 count = 0;
+	char			*cat;
 
 	if (p->flags & (PP_ALTERNATE_FORM1|PP_ALTERNATE_FORM2)) {
-		LL_COUNT(pkg->categories, el, count);
-		return (list_count(sbuf, count, p));
+		return (list_count(sbuf, pkg_list_count(pkg, PKG_CATEGORIES), p));
 	} else {
 		set_list_defaults(p, "%Cn", ", ");
 
 		count = 1;
-		LL_FOREACH(pkg->categories, el) {
+		kh_each_value(pkg->categories, cat, {
 			if (count > 1)
 				iterate_item(sbuf, pkg, sbuf_data(p->sep_fmt),
-				    el, count, PP_C);
+				    cat, count, PP_C);
 
-			iterate_item(sbuf, pkg, sbuf_data(p->item_fmt), el,
+			iterate_item(sbuf, pkg, sbuf_data(p->item_fmt), cat,
 			    count, PP_C);
 			count++;
-		}
+		});
 	}
 	return (sbuf);
 }
@@ -982,9 +961,9 @@ format_categories(struct sbuf *sbuf, const void *data, struct percent_esc *p)
 struct sbuf *
 format_category_name(struct sbuf *sbuf, const void *data, struct percent_esc *p)
 {
-	const struct pkg_strel	*el = data;
+	const char *cat = data;
 
-	return (string_val(sbuf, el->value, p));
+	return (string_val(sbuf, cat, p));
 }
 
 /*
@@ -1158,7 +1137,7 @@ format_file_user(struct sbuf *sbuf, const void *data, struct percent_esc *p)
 /*
  * %G -- Groups. list of string values.  Optionally accepts following
  * per-field format in %{ %| %} where %Gn will be replaced by each
- * groupname or %#Gn by the gid or %Gg by the "gidstr" -- a line from
+ * groupname or %#Gn by the gid -- a line from
  * /etc/group. Default %{%Gn\n%|%}
  */
 struct sbuf *
@@ -1169,8 +1148,8 @@ format_groups(struct sbuf *sbuf, const void *data, struct percent_esc *p)
 	if (p->flags & (PP_ALTERNATE_FORM1|PP_ALTERNATE_FORM2))
 		return (list_count(sbuf, pkg_list_count(pkg, PKG_GROUPS), p));
 	else {
-		struct pkg_group	*group = NULL;
-		int			 count;
+		char	*group = NULL;
+		int	 count;
 
 		set_list_defaults(p, "%Gn\n", "");
 
@@ -1189,25 +1168,14 @@ format_groups(struct sbuf *sbuf, const void *data, struct percent_esc *p)
 }
 
 /*
- * %Gg -- Group 'gidstr' (one line from /etc/group).
- */
-struct sbuf *
-format_group_gidstr(struct sbuf *sbuf, const void *data, struct percent_esc *p)
-{
-	const struct pkg_group	*group = data;
-
-	return (string_val(sbuf, group->gidstr, p));
-}
-
-/*
  * %Gn -- Group name.
  */
 struct sbuf *
 format_group_name(struct sbuf *sbuf, const void *data, struct percent_esc *p)
 {
-	const struct pkg_group	*group = data;
+	const char	*group = data;
 
-	return (string_val(sbuf, group->name, p));
+	return (string_val(sbuf, group, p));
 }
 
 /*
@@ -1230,25 +1198,24 @@ struct sbuf *
 format_licenses(struct sbuf *sbuf, const void *data, struct percent_esc *p)
 {
 	const struct pkg	*pkg = data;
-	struct pkg_strel	*el;
+	char			*lic;
 	int			 count = 0;
 
 	if (p->flags & (PP_ALTERNATE_FORM1|PP_ALTERNATE_FORM2)) {
-		LL_COUNT(pkg->licenses, el, count);
-		return (list_count(sbuf, count, p));
+		return (list_count(sbuf, pkg_list_count(pkg, PKG_LICENSES), p));
 	} else {
 		set_list_defaults(p, "%Ln", " %l ");
 
 		count = 1;
-		LL_FOREACH(pkg->licenses, el) {
+		kh_each_value(pkg->licenses, lic, {
 			if (count > 1)
 				iterate_item(sbuf, pkg, sbuf_data(p->sep_fmt),
-				    el, count, PP_L);
+				    lic, count, PP_L);
 
-			iterate_item(sbuf, pkg, sbuf_data(p->item_fmt), el,
+			iterate_item(sbuf, pkg, sbuf_data(p->item_fmt), lic,
 			    count, PP_L);
 			count++;
-		}
+		});
 	}
 	return (sbuf);
 }
@@ -1259,9 +1226,9 @@ format_licenses(struct sbuf *sbuf, const void *data, struct percent_esc *p)
 struct sbuf *
 format_license_name(struct sbuf *sbuf, const void *data, struct percent_esc *p)
 {
-	const struct pkg_strel	*el = data;
+	const char *lic = data;
 
-	return (string_val(sbuf, el->value, p));
+	return (string_val(sbuf, lic, p));
 }
 
 /*
@@ -1272,7 +1239,7 @@ format_message(struct sbuf *sbuf, const void *data, struct percent_esc *p)
 {
 	const struct pkg	*pkg = data;
 
-	return (string_val(sbuf, pkg->message, p));
+	return (string_val(sbuf, pkg->message ? pkg->message->str : NULL, p));
 }
 
 /*
@@ -1394,7 +1361,7 @@ format_char_string(struct sbuf *sbuf, const void *data, struct percent_esc *p)
 /*
  * %U -- Users. list of string values.  Optionally accepts following
  * per-field format in %{ %| %} where %Un will be replaced by each
- * username or %#Un by the uid or %Uu by the uidstr -- a line from
+ * username or %#Un by the uid -- a line from
  * /etc/passwd. Default %{%Un\n%|%}
  */
 struct sbuf *
@@ -1405,8 +1372,8 @@ format_users(struct sbuf *sbuf, const void *data, struct percent_esc *p)
 	if (p->flags & (PP_ALTERNATE_FORM1|PP_ALTERNATE_FORM2))
 		return (list_count(sbuf, pkg_list_count(pkg, PKG_USERS), p));
 	else {
-		struct pkg_user	*user = NULL;
-		int		 count;
+		char	*user = NULL;
+		int	 count;
 
 		set_list_defaults(p, "%Un\n", "");
 
@@ -1430,20 +1397,9 @@ format_users(struct sbuf *sbuf, const void *data, struct percent_esc *p)
 struct sbuf *
 format_user_name(struct sbuf *sbuf, const void *data, struct percent_esc *p)
 {
-	const struct pkg_user	*user = data;
+	const char	*user = data;
 
-	return (string_val(sbuf, user->name, p));
-}
-
-/*
- * %Uu -- User uidstr (one line from /etc/passwd).
- */
-struct sbuf *
-format_user_uidstr(struct sbuf *sbuf, const void *data, struct percent_esc *p)
-{
-	const struct pkg_user	*user = data;
-
-	return (string_val(sbuf, user->uidstr, p));
+	return (string_val(sbuf, user, p));
 }
 
 /*
@@ -1470,8 +1426,8 @@ format_required(struct sbuf *sbuf, const void *data, struct percent_esc *p)
 	if (p->flags & (PP_ALTERNATE_FORM1|PP_ALTERNATE_FORM2))
 		return (list_count(sbuf, pkg_list_count(pkg, PKG_REQUIRES), p));
 	else {
-		struct pkg_provide	*provide = NULL;
-		int			 count;
+		char	*provide = NULL;
+		int	 count;
 
 		set_list_defaults(p, "%Yn\n", "");
 
@@ -1495,9 +1451,9 @@ format_required(struct sbuf *sbuf, const void *data, struct percent_esc *p)
 struct sbuf *
 format_provide_name(struct sbuf *sbuf, const void *data, struct percent_esc *p)
 {
-	const struct pkg_provide	*provide = data;
+	const char	*provide = data;
 
-	return (string_val(sbuf, provide->provide, p));
+	return (string_val(sbuf, provide, p));
 }
 /*
  * %a -- Autoremove flag. boolean.  Accepts field-width, left-align.
@@ -1526,8 +1482,8 @@ format_shlibs_provided(struct sbuf *sbuf, const void *data, struct percent_esc *
 	if (p->flags & (PP_ALTERNATE_FORM1|PP_ALTERNATE_FORM2))
 		return (list_count(sbuf, pkg_list_count(pkg, PKG_SHLIBS_PROVIDED), p));
 	else {
-		struct pkg_shlib	*shlib = NULL;
-		int			 count;
+		char	*shlib = NULL;
+		int	 count;
 
 		set_list_defaults(p, "%bn\n", "");
 
@@ -1861,8 +1817,8 @@ format_provided(struct sbuf *sbuf, const void *data, struct percent_esc *p)
 	if (p->flags & (PP_ALTERNATE_FORM1|PP_ALTERNATE_FORM2))
 		return (list_count(sbuf, pkg_list_count(pkg, PKG_PROVIDES), p));
 	else {
-		struct pkg_provide	*provide = NULL;
-		int			 count;
+		char	*provide = NULL;
+		int	 count;
 
 		set_list_defaults(p, "%yn\n", "");
 

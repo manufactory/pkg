@@ -75,7 +75,7 @@ pkg_create_from_dir(struct pkg *pkg, const char *root,
 	 * Get / compute size / checksum if not provided in the manifest
 	 */
 
-	nfiles = HASH_COUNT(pkg->files);
+	nfiles = kh_count(pkg->files);
 	counter_init("file sizes/checksums", nfiles);
 
 	hardlinks = kh_init_hardlinks();
@@ -146,7 +146,7 @@ pkg_create_from_dir(struct pkg *pkg, const char *root,
 
 	counter_end();
 
-	nfiles = HASH_COUNT(pkg->dirs);
+	nfiles = kh_count(pkg->dirs);
 	counter_init("packing directories", nfiles);
 
 	while (pkg_dirs(pkg, &dir) == EPKG_OK) {
@@ -283,6 +283,43 @@ pkg_load_from_file(int fd, struct pkg *pkg, pkg_attr attr, const char *path)
 	}
 }
 
+static int
+pkg_load_message_from_file(int fd, struct pkg *pkg, const char *path, bool is_ucl)
+{
+	char *buf = NULL;
+	off_t size = 0;
+	int ret;
+	ucl_object_t *obj;
+
+	assert(pkg != NULL);
+	assert(path != NULL);
+
+	if (faccessat(fd, path, F_OK, 0) == 0) {
+		pkg_debug(1, "Reading message: '%s'", path);
+
+		if ((ret = file_to_bufferat(fd, path, &buf, &size)) != EPKG_OK) {
+			return (ret);
+		}
+
+		if (is_ucl) {
+			ret = pkg_message_from_str(pkg, buf, size);
+			free(buf);
+
+			return (ret);
+		}
+		else {
+			obj = ucl_object_fromlstring(buf, size);
+			ret = pkg_message_from_ucl(pkg, obj);
+			ucl_object_unref(obj);
+			free(buf);
+
+			return (ret);
+		}
+	}
+
+	return (EPKG_FATAL);
+}
+
 int
 pkg_create_staged(const char *outdir, pkg_formats format, const char *rootdir,
     const char *md_dir, char *plist)
@@ -325,8 +362,13 @@ pkg_create_staged(const char *outdir, pkg_formats format, const char *rootdir,
 		pkg_load_from_file(mfd, pkg, PKG_DESC, "+DESC");
 
 	/* if no message try to get it from a file */
-	if (pkg->message == NULL)
-		pkg_load_from_file(mfd, pkg, PKG_MESSAGE, "+DISPLAY");
+	if (pkg->message == NULL) {
+		/* Try ucl version first */
+		if (pkg_load_message_from_file(mfd, pkg, "+DISPLAY.ucl", true)
+				!= EPKG_OK) {
+			pkg_load_message_from_file(mfd, pkg, "+DISPLAY", false);
+		}
+	}
 
 	/* if no arch autodetermine it */
 	if (pkg->abi == NULL) {

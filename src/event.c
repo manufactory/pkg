@@ -615,26 +615,26 @@ event_callback(void *data, struct pkg_event *ev)
 	case PKG_EVENT_INSTALL_BEGIN:
 		if (quiet)
 			break;
-		else {
-			nbdone++;
-			job_status_begin(msg_buf);
+		job_status_begin(msg_buf);
 
-			pkg = ev->e_install_begin.pkg;
-			pkg_sbuf_printf(msg_buf, "Installing %n-%v...\n", pkg,
-			    pkg);
-			sbuf_finish(msg_buf);
-			printf("%s", sbuf_data(msg_buf));
-		}
+		pkg = ev->e_install_begin.pkg;
+		pkg_sbuf_printf(msg_buf, "Installing %n-%v...\n", pkg,
+		    pkg);
+		sbuf_finish(msg_buf);
+		printf("%s", sbuf_data(msg_buf));
 		break;
 	case PKG_EVENT_INSTALL_FINISHED:
 		if (quiet)
 			break;
 		pkg = ev->e_install_finished.pkg;
 		if (pkg_has_message(pkg)) {
-			if (messages == NULL)
-				messages = sbuf_new_auto();
-			pkg_sbuf_printf(messages, "Message for %n-%v:\n%M\n",
-			    pkg, pkg, pkg);
+
+			if (pkg_need_message(pkg, ev->e_install_finished.old)) {
+				if (messages == NULL)
+					messages = sbuf_new_auto();
+				pkg_sbuf_printf(messages, "Message for %n-%v:\n%M\n",
+						pkg, pkg, pkg);
+			}
 		}
 		break;
 	case PKG_EVENT_EXTRACT_BEGIN:
@@ -684,7 +684,6 @@ event_callback(void *data, struct pkg_event *ev)
 	case PKG_EVENT_DEINSTALL_BEGIN:
 		if (quiet)
 			break;
-		nbdone++;
 
 		job_status_begin(msg_buf);
 
@@ -714,7 +713,6 @@ event_callback(void *data, struct pkg_event *ev)
 			break;
 		pkg_new = ev->e_upgrade_begin.n;
 		pkg_old = ev->e_upgrade_begin.o;
-		nbdone++;
 
 		job_status_begin(msg_buf);
 
@@ -740,10 +738,13 @@ event_callback(void *data, struct pkg_event *ev)
 			break;
 		pkg_new = ev->e_upgrade_finished.n;
 		if (pkg_has_message(pkg_new)) {
-			if (messages == NULL)
-				messages = sbuf_new_auto();
-			pkg_sbuf_printf(messages, "Message for %n-%v:\n %M\n",
-				pkg_new, pkg_new, pkg_new);
+
+			if (pkg_need_message(pkg_new, ev->e_upgrade_finished.o)) {
+				if (messages == NULL)
+					messages = sbuf_new_auto();
+				pkg_sbuf_printf(messages, "Message for %n-%v:\n%M\n",
+						pkg_new, pkg_new, pkg_new);
+			}
 		}
 		break;
 	case PKG_EVENT_LOCKED:
@@ -770,9 +771,8 @@ event_callback(void *data, struct pkg_event *ev)
 		    "the repositories\n", ev->e_not_found.pkg_name);
 		break;
 	case PKG_EVENT_MISSING_DEP:
-		warnx("Missing dependency '%s-%s'",
-		    pkg_dep_name(ev->e_missing_dep.dep),
-		    pkg_dep_version(ev->e_missing_dep.dep));
+		warnx("Missing dependency '%s'",
+		    pkg_dep_name(ev->e_missing_dep.dep));
 		break;
 	case PKG_EVENT_NOREMOTEDB:
 		fprintf(stderr, "Unable to open remote database \"%s\". "
@@ -854,6 +854,9 @@ event_callback(void *data, struct pkg_event *ev)
 	case PKG_EVENT_RESTORE:
 		sbuf_cat(msg_buf, "Restoring");
 		sbuf_finish(msg_buf);
+		break;
+	case PKG_EVENT_NEW_ACTION:
+		nbdone++;
 		break;
 	default:
 		break;

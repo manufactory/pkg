@@ -126,7 +126,7 @@ format_str(struct pkg *pkg, struct sbuf *dest, const char *qstr, const void *dat
 			case 's':
 				qstr++;
 				if (qstr[0] == 'h') 
-					pkg_sbuf_printf(dest, "%?sB", pkg);
+					pkg_sbuf_printf(dest, "%#sB", pkg);
 			        else if (qstr[0] == 'b')
 					pkg_sbuf_printf(dest, "%s", pkg);
 				break;
@@ -334,11 +334,8 @@ print_query(struct pkg *pkg, char *qstr, char multiline)
 	struct pkg_option	*option = NULL;
 	struct pkg_file		*file   = NULL;
 	struct pkg_dir		*dir    = NULL;
-	struct pkg_user		*user   = NULL;
-	struct pkg_group	*group  = NULL;
-	struct pkg_shlib	*shlib  = NULL;
+	char			*buf;
 	struct pkg_kv		*kv;
-	struct pkg_strel	*list;
 
 	switch (multiline) {
 	case 'd':
@@ -354,11 +351,10 @@ print_query(struct pkg *pkg, char *qstr, char multiline)
 		}
 		break;
 	case 'C':
-		pkg_get(pkg, PKG_CATEGORIES, &list);
-		while (list != NULL) {
-			format_str(pkg, output, qstr, list);
+		buf = NULL;
+		while (pkg_categories(pkg, &buf) == EPKG_OK) {
+			format_str(pkg, output, qstr, buf);
 			printf("%s\n", sbuf_data(output));
-			list = list->next;
 		}
 		break;
 	case 'O':
@@ -380,34 +376,37 @@ print_query(struct pkg *pkg, char *qstr, char multiline)
 		}
 		break;
 	case 'L':
-		pkg_get(pkg, PKG_LICENSES, &list);
-		while (list != NULL) {
-			format_str(pkg, output, qstr, list);
+		buf = NULL;
+		while (pkg_licenses(pkg, &buf) == EPKG_OK) {
+			format_str(pkg, output, qstr, buf);
 			printf("%s\n", sbuf_data(output));
-			list = list->next;
 		}
 		break;
 	case 'U':
-		while (pkg_users(pkg, &user) == EPKG_OK) {
-			format_str(pkg, output, qstr, user);
+		buf = NULL;
+		while (pkg_users(pkg, &buf) == EPKG_OK) {
+			format_str(pkg, output, qstr, buf);
 			printf("%s\n", sbuf_data(output));
 		}
 		break;
 	case 'G':
-		while (pkg_groups(pkg, &group) == EPKG_OK) {
-			format_str(pkg, output, qstr, group);
+		buf = NULL;
+		while (pkg_groups(pkg, &buf) == EPKG_OK) {
+			format_str(pkg, output, qstr, buf);
 			printf("%s\n", sbuf_data(output));
 		}
 		break;
 	case 'B':
-		while (pkg_shlibs_required(pkg, &shlib) == EPKG_OK) {
-			format_str(pkg, output, qstr, shlib);
+		buf = NULL;
+		while (pkg_shlibs_required(pkg, &buf) == EPKG_OK) {
+			format_str(pkg, output, qstr, buf);
 			printf("%s\n", sbuf_data(output));
 		}
 		break;
 	case 'b':
-		while (pkg_shlibs_provided(pkg, &shlib) == EPKG_OK) {
-			format_str(pkg, output, qstr, shlib);
+		buf = NULL;
+		while (pkg_shlibs_provided(pkg, &buf) == EPKG_OK) {
+			format_str(pkg, output, qstr, buf);
 			printf("%s\n", sbuf_data(output));
 		}
 		break;

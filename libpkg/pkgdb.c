@@ -69,6 +69,7 @@
 #include "private/pkgdb.h"
 #include "private/utils.h"
 #include "private/pkg_deps.h"
+#include "kvec.h"
 
 #include "private/db_upgrades.h"
 
@@ -1660,16 +1661,14 @@ int
 pkgdb_register_pkg(struct pkgdb *db, struct pkg *pkg, int complete, int forced)
 {
 	struct pkg		*pkg2 = NULL;
-	struct pkg_strel	*el;
 	struct pkg_dep		*dep = NULL;
 	struct pkg_file		*file = NULL;
 	struct pkg_dir		*dir = NULL;
 	struct pkg_option	*option = NULL;
-	struct pkg_user		*user = NULL;
-	struct pkg_group	*group = NULL;
 	struct pkg_conflict	*conflict = NULL;
 	struct pkg_config_file	*cf = NULL;
 	struct pkgdb_it		*it = NULL;
+	char			*buf, *msg = NULL;
 
 	sqlite3			*s;
 
@@ -1697,8 +1696,9 @@ pkgdb_register_pkg(struct pkgdb *db, struct pkg *pkg, int complete, int forced)
 	/*
 	 * Insert package record
 	 */
+	msg = pkg_message_to_str(pkg);
 	ret = run_prstmt(PKG, pkg->origin, pkg->name, pkg->version,
-	    pkg->comment, pkg->desc, pkg->message, arch, pkg->maintainer,
+	    pkg->comment, pkg->desc, msg, arch, pkg->maintainer,
 	    pkg->www, pkg->prefix, pkg->flatsize, (int64_t)pkg->automatic,
 	    (int64_t)pkg->licenselogic, NULL, pkg->digest, pkg->dep_formula);
 	if (ret != SQLITE_DONE) {
@@ -1719,7 +1719,8 @@ pkgdb_register_pkg(struct pkgdb *db, struct pkg *pkg, int complete, int forced)
 	 * package
 	 */
 
-	if (run_prstmt(DEPS_UPDATE, pkg->origin, pkg->version, pkg->name)
+	if (run_prstmt(DEPS_UPDATE, pkg->origin,
+	    pkg->version ? pkg->version : "", pkg->name)
 	    != SQLITE_DONE) {
 		ERROR_SQLITE(s, SQL(DEPS_UPDATE));
 		goto cleanup;
@@ -1730,7 +1731,8 @@ pkgdb_register_pkg(struct pkgdb *db, struct pkg *pkg, int complete, int forced)
 	 */
 
 	while (pkg_deps(pkg, &dep) == EPKG_OK) {
-		if (run_prstmt(DEPS, dep->origin, dep->name, dep->version,
+		if (run_prstmt(DEPS, dep->origin, dep->name,
+		    dep->version ? dep->version : "",
 		    package_id) != SQLITE_DONE) {
 			ERROR_SQLITE(s, SQL(DEPS));
 			goto cleanup;
@@ -1841,40 +1843,41 @@ pkgdb_register_pkg(struct pkgdb *db, struct pkg *pkg, int complete, int forced)
 	 * Insert categories
 	 */
 
-	LL_FOREACH(pkg->categories, el) {
-		ret = run_prstmt(CATEGORY1, el->value);
+	kh_each_value(pkg->categories, buf, {
+		ret = run_prstmt(CATEGORY1, buf);
 		if (ret == SQLITE_DONE)
-			ret = run_prstmt(CATEGORY2, package_id, el->value);
+			ret = run_prstmt(CATEGORY2, package_id, buf);
 		if (ret != SQLITE_DONE) {
 			ERROR_SQLITE(s, SQL(CATEGORY2));
 			goto cleanup;
 		}
-	}
+	});
 
 	/*
 	 * Insert licenses
 	 */
 
-	LL_FOREACH(pkg->licenses, el) {
-		if (run_prstmt(LICENSES1, el->value)
+	kh_each_value(pkg->licenses, buf, {
+		if (run_prstmt(LICENSES1, buf)
 		    != SQLITE_DONE
 		    ||
-		    run_prstmt(LICENSES2, package_id, el->value)
+		    run_prstmt(LICENSES2, package_id, buf)
 		    != SQLITE_DONE) {
 			ERROR_SQLITE(s, SQL(LICENSES2));
 			goto cleanup;
 		}
-	}
+	});
 
 	/*
 	 * Insert users
 	 */
 
-	while (pkg_users(pkg, &user) == EPKG_OK) {
-		if (run_prstmt(USERS1, user->name)
+	buf = NULL;
+	while (pkg_users(pkg, &buf) == EPKG_OK) {
+		if (run_prstmt(USERS1, buf)
 		    != SQLITE_DONE
 		    ||
-		    run_prstmt(USERS2, package_id, user->name)
+		    run_prstmt(USERS2, package_id, buf)
 		    != SQLITE_DONE) {
 			ERROR_SQLITE(s, SQL(USERS2));
 			goto cleanup;
@@ -1885,11 +1888,12 @@ pkgdb_register_pkg(struct pkgdb *db, struct pkg *pkg, int complete, int forced)
 	 * Insert groups
 	 */
 
-	while (pkg_groups(pkg, &group) == EPKG_OK) {
-		if (run_prstmt(GROUPS1, group->name)
+	buf = NULL;
+	while (pkg_groups(pkg, &buf) == EPKG_OK) {
+		if (run_prstmt(GROUPS1, buf)
 		    != SQLITE_DONE
 		    ||
-		    run_prstmt(GROUPS2, package_id, group->name)
+		    run_prstmt(GROUPS2, package_id, buf)
 		    != SQLITE_DONE) {
 			ERROR_SQLITE(s, SQL(GROUPS2));
 			goto cleanup;
@@ -1954,6 +1958,8 @@ pkgdb_register_pkg(struct pkgdb *db, struct pkg *pkg, int complete, int forced)
 
 	cleanup:
 
+	free(msg);
+
 	return (retcode);
 }
 
@@ -1982,13 +1988,13 @@ pkgdb_insert_scripts(struct pkg *pkg, int64_t package_id, sqlite3 *s)
 int
 pkgdb_update_shlibs_required(struct pkg *pkg, int64_t package_id, sqlite3 *s)
 {
-	struct pkg_shlib	*shlib = NULL;
+	char	*shlib = NULL;
 
 	while (pkg_shlibs_required(pkg, &shlib) == EPKG_OK) {
-		if (run_prstmt(SHLIBS1, shlib->name)
+		if (run_prstmt(SHLIBS1, shlib)
 		    != SQLITE_DONE
 		    ||
-		    run_prstmt(SHLIBS_REQD, package_id, shlib->name)
+		    run_prstmt(SHLIBS_REQD, package_id, shlib)
 		    != SQLITE_DONE) {
 			ERROR_SQLITE(s, SQL(SHLIBS_REQD));
 			return (EPKG_FATAL);
@@ -2017,13 +2023,13 @@ pkgdb_update_config_file_content(struct pkg *p, sqlite3 *s)
 int
 pkgdb_update_shlibs_provided(struct pkg *pkg, int64_t package_id, sqlite3 *s)
 {
-	struct pkg_shlib	*shlib = NULL;
+	char	*shlib = NULL;
 
 	while (pkg_shlibs_provided(pkg, &shlib) == EPKG_OK) {
-		if (run_prstmt(SHLIBS1, shlib->name)
+		if (run_prstmt(SHLIBS1, shlib)
 		    != SQLITE_DONE
 		    ||
-		    run_prstmt(SHLIBS_PROV, package_id, shlib->name)
+		    run_prstmt(SHLIBS_PROV, package_id, shlib)
 		    != SQLITE_DONE) {
 			ERROR_SQLITE(s, SQL(SHLIBS_PROV));
 			return (EPKG_FATAL);
@@ -2036,13 +2042,13 @@ pkgdb_update_shlibs_provided(struct pkg *pkg, int64_t package_id, sqlite3 *s)
 int
 pkgdb_update_requires(struct pkg *pkg, int64_t package_id, sqlite3 *s)
 {
-	struct pkg_provide	*provide = NULL;
+	char	*require = NULL;
 
-	while (pkg_requires(pkg, &provide) == EPKG_OK) {
-		if (run_prstmt(REQUIRE, provide->provide)
+	while (pkg_requires(pkg, &require) == EPKG_OK) {
+		if (run_prstmt(REQUIRE, require)
 		    != SQLITE_DONE
 		    ||
-		    run_prstmt(PKG_REQUIRE, package_id, provide->provide)
+		    run_prstmt(PKG_REQUIRE, package_id, require)
 		    != SQLITE_DONE) {
 			ERROR_SQLITE(s, SQL(PKG_REQUIRE));
 			return (EPKG_FATAL);
@@ -2055,13 +2061,13 @@ pkgdb_update_requires(struct pkg *pkg, int64_t package_id, sqlite3 *s)
 int
 pkgdb_update_provides(struct pkg *pkg, int64_t package_id, sqlite3 *s)
 {
-	struct pkg_provide	*provide = NULL;
+	char	*provide = NULL;
 
 	while (pkg_provides(pkg, &provide) == EPKG_OK) {
-		if (run_prstmt(PROVIDE, provide->provide)
+		if (run_prstmt(PROVIDE, provide)
 		    != SQLITE_DONE
 		    ||
-		    run_prstmt(PKG_PROVIDE, package_id, provide->provide)
+		    run_prstmt(PKG_PROVIDE, package_id, provide)
 		    != SQLITE_DONE) {
 			ERROR_SQLITE(s, SQL(PKG_PROVIDE));
 			return (EPKG_FATAL);
@@ -2297,7 +2303,7 @@ pkgdb_register_ports(struct pkgdb *db, struct pkg *pkg)
 
 	ret = pkgdb_register_pkg(db, pkg, 0, 0);
 	if (ret == EPKG_OK)
-		pkg_emit_install_finished(pkg);
+		pkg_emit_install_finished(pkg, NULL);
 
 	pkgdb_register_finale(db, ret);
 
@@ -3074,29 +3080,32 @@ pkgdb_begin_solver(struct pkgdb *db)
 		"END TRANSACTION;"
 		"CREATE INDEX pkg_digest_id ON packages(origin, manifestdigest);";
 	struct pkgdb_it *it;
-	struct pkg *pkglist = NULL, *p = NULL;
+	struct pkg *p = NULL;
+	kvec_t(struct pkg *) pkglist;
 	int rc = EPKG_OK;
 	int64_t cnt = 0, cur = 0;
 
 	it = pkgdb_query(db, " WHERE manifestdigest IS NULL OR manifestdigest==''",
 		MATCH_CONDITION);
 	if (it != NULL) {
+		kv_init(pkglist);
 		while (pkgdb_it_next(it, &p, PKG_LOAD_BASIC|PKG_LOAD_OPTIONS) == EPKG_OK) {
 			pkg_checksum_calculate(p, NULL);
-			LL_PREPEND(pkglist, p);
+			kv_prepend(typeof(p), pkglist, p);
 			p = NULL;
 			cnt ++;
 		}
 		pkgdb_it_free(it);
 
-		if (pkglist != NULL) {
+		if (kv_size(pkglist) > 0) {
 			rc = sql_exec(db->sqlite, update_digests_sql);
 			if (rc != EPKG_OK) {
 				ERROR_SQLITE(db->sqlite, update_digests_sql);
 			}
 			else {
 				pkg_emit_progress_start("Updating database digests format");
-				LL_FOREACH(pkglist, p) {
+				for (int i = 0; i < kv_size(pkglist); i++) {
+					p = kv_A(pkglist, i);
 					pkg_emit_progress_tick(cur++, cnt);
 					rc = run_prstmt(UPDATE_DIGEST, p->digest, p->id);
 					if (rc != SQLITE_DONE) {
@@ -3117,9 +3126,10 @@ pkgdb_begin_solver(struct pkgdb *db)
 		if (rc == EPKG_OK)
 			rc = sql_exec(db->sqlite, solver_sql);
 
-		LL_FREE(pkglist, pkg_free);
-	}
-	else {
+		while (kv_size(pkglist) > 0 && (p = kv_pop(pkglist)))
+			pkg_free(p);
+		kv_destroy(pkglist);
+	} else {
 		rc = sql_exec(db->sqlite, solver_sql);
 	}
 

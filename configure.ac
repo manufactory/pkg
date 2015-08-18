@@ -348,12 +348,12 @@ if test "$ac_cv_func_dirname" = yes ; then
 fi
 
 AC_CACHE_CHECK(for BSD statfs(const char *path, struct statfs *buf),
-               ac_cv_func_dirname,
+               ac_cv_func_statfs,
                [ac_save_CFLAGS="$CFLAGS"
 		CFLAGS="-Werror $CFLAGS"
 		AC_TRY_COMPILE([#include <sys/param.h>
      					#include <sys/mount.h>],
-                               [static int *(*ac_test_statfs)(const char *path, struct statfs *buf) = statfs; ac_test_statfs("");],
+                               [struct statfs stfs; static int (*ac_test_statfs)(const char *path, struct statfs *buf) = statfs; ac_test_statfs("", &stfs);],
                                [ac_cv_func_statfs=yes],
                                [ac_cv_func_statfs=no])
 		CFLAGS="$ac_save_CFLAGS"])
@@ -455,12 +455,16 @@ AC_SUBST([REPOS_LDADD])
 AC_SUBST([REPOS_LDADD_STATIC])
 
 AC_CONFIG_FILES(Makefile \
+		Kyuafile \
 		src/Makefile \
 		external/Makefile \
 		external/blake2/Makefile \
 		scripts/Makefile \
 		docs/Makefile \
 		tests/Makefile \
+		tests/Kyuafile \
+		tests/frontend/Kyuafile \
+		tests/frontend/test_environment.sh \
 		compat/Makefile \
 		libpkg/Makefile \
 		libpkg/repo/Makefile \
