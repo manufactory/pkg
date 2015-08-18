@@ -175,7 +175,7 @@ pkg_repo_linux_deb_parse_relase_hash(FILE *fp, char *filename, char *hash)
 }
 
 static int
-pkg_repo_linux_deb_fetch_check_extract_packages(struct pkg_repo *repo, int *fd, FILE *release_fp) {
+pkg_repo_linux_deb_fetch_check_extract_packages(struct pkg_repo *repo, int *target_fd, FILE *release_fp) {
         
         char packages_url[MAXPATHLEN]; /* Packages.gz */
  
@@ -191,6 +191,7 @@ pkg_repo_linux_deb_fetch_check_extract_packages(struct pkg_repo *repo, int *fd, 
         const char *abi;
         const char *distribution; /* like main, contrib, non-free, ... */
         int ret = EPKG_FATAL;
+        int fd = -1;
 
         /* small TODO: check if size, hash has changed, take infos from existing Release file
          * if yes there's nothing to download. */
@@ -230,7 +231,7 @@ pkg_repo_linux_deb_fetch_check_extract_packages(struct pkg_repo *repo, int *fd, 
                 goto cleanup;
         }
 
-        *fd = open(packages_file, O_RDONLY);
+        fd = open(packages_file, O_RDONLY);
 
         if (release_fp == NULL) {
                 pkg_emit_errno("open", "");
@@ -246,7 +247,7 @@ pkg_repo_linux_deb_fetch_check_extract_packages(struct pkg_repo *repo, int *fd, 
                 goto cleanup;
         }
 
-        fetched_hash = pkg_checksum_fd(*fd, PKG_HASH_TYPE_SHA256_HEX);
+        fetched_hash = pkg_checksum_fd(fd, PKG_HASH_TYPE_SHA256_HEX);
 
         if (fetched_hash == NULL) {
                 pkg_emit_error("Error calculating hash for %s", DEBIAN_PACKAGES_FILE);
@@ -261,13 +262,13 @@ pkg_repo_linux_deb_fetch_check_extract_packages(struct pkg_repo *repo, int *fd, 
 
         /* extract Packages */
 
-        (void)lseek(*fd, 0, SEEK_SET);
+        (void)lseek(fd, 0, SEEK_SET);
 
         strlcpy(packages_file_extracted, packages_file,
                 sizeof(packages_file_extracted));
         pkg_add_file_random_suffix(packages_file_extracted, sizeof(packages_file_extracted), 12);
         
-        ret = pkg_repo_util_extract_fd(*fd, packages_file,
+        ret = pkg_repo_util_extract_fd(fd, packages_file,
                 packages_file_extracted);
         
 
@@ -275,8 +276,21 @@ pkg_repo_linux_deb_fetch_check_extract_packages(struct pkg_repo *repo, int *fd, 
                 goto cleanup;
         }
 
+
+        *target_fd = open(packages_file_extracted, O_RDONLY);
+        if (*target_fd == -1) {
+                pkg_emit_errno("open", "");
+                goto cleanup;
+        }
+
+
 cleanup:
         free(fetched_hash);
+        
+        ret = close(fd);
+        if (ret == -1) {
+                pkg_emit_errno("close", "");
+        }
         
         /* remove zipped original */
         (void) unlink(packages_file);
@@ -774,14 +788,24 @@ pkg_repo_linux_deb_update_proceed(const char *name, struct pkg_repo *repo,
                 return EPKG_FATAL;
         }
         
-        packages_fd = open("/tmp/Packages", O_RDONLY);
+        //packages_fd = open("/tmp/Packages", O_RDONLY);
+        rc = pkg_repo_linux_deb_fetch_check_extract_packages(repo, &packages_fd, release_fp); 
+        if (rc != EPKG_OK) {
+                rc = EPKG_FATAL;
+                goto cleanup;
+        }
 
         packages_fp = fdopen(packages_fd, "r");
 
-        if (packages_fp == NULL) {
+        if (ferror(packages_fp)) {
                 pkg_emit_errno("fdopen", "");
                 goto cleanup;
         }
+
+        /*if (packages_fp == NULL &&) {
+                pkg_emit_errno("fdopen", "");
+                goto cleanup;
+        } */
 
         /* stolen code that can stay */
         /* Load local repository data */
@@ -791,10 +815,10 @@ pkg_repo_linux_deb_update_proceed(const char *name, struct pkg_repo *repo,
               goto cleanup;
       }
 
-//      /* Here sqlite is initialized */
+      /* Here sqlite is initialized */
       sqlite = PRIV_GET(repo);
 
-      pkg_debug(1, "Pkgrepo, reading new packagesite.yaml for '%s'", name);
+      pkg_debug(1, "Pkgrepo, reading new Packages for '%s'", name);
 
       pkg_emit_progress_start("Processing entries");
 
