@@ -109,20 +109,19 @@ pkg_repo_linux_deb_query(struct pkg_repo *repo, const char *pattern, match_t mat
 	const char	*comp = NULL;
 	int		 ret;
 	char		 basesql[BUFSIZ] = ""
-		"SELECT id, name, name as uniqueid, version, comment, "
-		"prefix, desc, arch, maintainer, www, "
-		"flatsize, pkgsize, "
-		"cksum, path AS repopath, '%s' AS dbname "
-		"FROM packages AS p";
+                "SELECT id, name, name as uniqueid, version, comment,"
+                "prefix, arch, maintainer, www,"
+                "flatsize, pkgsize,"
+                "cksum, path AS repopath, '%s' AS dbname FROM packages AS p";
 
 	if (match != MATCH_ALL && (pattern == NULL || pattern[0] == '\0'))
 		return (NULL);
 
 	sql = sbuf_new_auto();
-	comp = pkgdb_get_pattern_query(pattern, match);
+	/* comp = pkgdb_get_pattern_query(pattern, match);
 	if (comp && comp[0])
 		strlcat(basesql, comp, sizeof(basesql));
-
+*/
 	sbuf_printf(sql, basesql, repo->name);
 
 	sbuf_cat(sql, " ORDER BY name;");

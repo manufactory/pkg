@@ -395,8 +395,9 @@ pkg_repo_linux_deb_open(struct pkg_repo *repo, unsigned mode)
 	/* Check digests format */
 	if ((it = pkg_repo_linux_deb_query(repo, NULL, MATCH_ALL)) == NULL)
 		return (EPKG_OK);
-
-	if (it->ops->next(it, &pkg, PKG_LOAD_BASIC) != EPKG_OK) {
+        
+        /* not really applicable here */
+	/*if (it->ops->next(it, &pkg, PKG_LOAD_BASIC) != EPKG_OK) {
 		it->ops->free(it);
 		return (EPKG_OK);
 	}
@@ -409,7 +410,7 @@ pkg_repo_linux_deb_open(struct pkg_repo *repo, unsigned mode)
 		repo->priv = NULL;
 		return (EPKG_FATAL);
 	}
-	pkg_free(pkg);
+	pkg_free(pkg); */
 
 	return (EPKG_OK);
 }
