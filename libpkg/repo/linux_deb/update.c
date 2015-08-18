@@ -175,7 +175,7 @@ pkg_repo_linux_deb_parse_relase_hash(FILE *fp, char *filename, char *hash)
 }
 
 static int
-pkg_repo_linux_deb_fetch_check_extract_packages(struct pkg_repo *repo, int *target_fd, FILE *release_fp) {
+pkg_repo_linux_deb_fetch_check_extract_packages(struct pkg_repo *repo, int *target_fd, FILE *release_fp, char **path) {
         
         char packages_url[MAXPATHLEN]; /* Packages.gz */
  
@@ -267,6 +267,8 @@ pkg_repo_linux_deb_fetch_check_extract_packages(struct pkg_repo *repo, int *targ
         strlcpy(packages_file_extracted, packages_file,
                 sizeof(packages_file_extracted));
         pkg_add_file_random_suffix(packages_file_extracted, sizeof(packages_file_extracted), 12);
+
+        *path = strdup(packages_file_extracted);
         
         ret = pkg_repo_util_extract_fd(fd, packages_file,
                 packages_file_extracted);
@@ -758,6 +760,7 @@ pkg_repo_linux_deb_update_proceed(const char *name, struct pkg_repo *repo,
         char tmp[MAXPATHLEN];
 
         char release_path[MAXPATHLEN];
+        char *packages_file = NULL;
         FILE *release_fp;
         int packages_fd = -1;
         FILE *packages_fp = NULL;
@@ -789,7 +792,7 @@ pkg_repo_linux_deb_update_proceed(const char *name, struct pkg_repo *repo,
         }
         
         //packages_fd = open("/tmp/Packages", O_RDONLY);
-        rc = pkg_repo_linux_deb_fetch_check_extract_packages(repo, &packages_fd, release_fp); 
+        rc = pkg_repo_linux_deb_fetch_check_extract_packages(repo, &packages_fd, release_fp, &packages_file); 
         if (rc != EPKG_OK) {
                 rc = EPKG_FATAL;
                 goto cleanup;
@@ -846,8 +849,10 @@ cleanup:
         if (packages_fp != NULL)
                 fclose(packages_fp);
 
+        /* delete extracted Packages file */
+        (void) unlink(packages_file);
+
       if (in_trans) {
-              pkg_debug(1, "in trans");
               if (rc != EPKG_OK) {
                       pkg_debug(1, "epkg ok");
                       pkgdb_transaction_rollback_sqlite(sqlite, "REPO");
