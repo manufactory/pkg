@@ -8,6 +8,10 @@
 #include <archive.h>
 #include <archive_entry.h>
 
+#include <sys/types.h>
+#include <unistd.h>
+#include <fcntl.h>
+
 #include <sqlite3.h>
 
 #include "pkg.h"
@@ -876,9 +880,9 @@ pkg_linux_deb_read_control(sqlite3 *sqlite, struct pkg *pkg, void *buf, int64_t 
         const char *ae_pathname;
 
         struct pkg_file *file;
-        struct pkg_dir *dir;
         struct pkg_config_file *config_file;
-        char *next, *pos, *eol;
+        char *pos, *eol;
+        FILE *fp;
 
 
         a = archive_read_new();
@@ -906,6 +910,11 @@ pkg_linux_deb_read_control(sqlite3 *sqlite, struct pkg *pkg, void *buf, int64_t 
                 /* if this turns out to be too slow, it is possible to malloc,
                  * the whole archive size, and do a pointer polka here */
                 inner = malloc(inner_sz);
+
+                if (inner == NULL) {
+                        //pkg_emit_errno("malloc", "");
+                        goto cleanup;
+                }
 
                 /* skip prepending './' */
                 if (strcmp(ae_pathname + 2, "md5sums") == 0) {
@@ -953,25 +962,25 @@ pkg_linux_deb_read_control(sqlite3 *sqlite, struct pkg *pkg, void *buf, int64_t 
 
                                 eol = strchr(walk, '\n');
                                 snprintf(config_file->path,
-                                        sizeof(config_file->path), "%s",
-                                        pkg->prefix);
+                                                sizeof(config_file->path), "%s",
+                                                pkg->prefix);
                                 strlcat(config_file->path, walk, eol - walk +
-                                        strlen(config_file->path) + 1);
+                                                strlen(config_file->path) + 1);
 
                                 printf("config file:%s\n", config_file->path);
 
                                 HASH_ADD_KEYPTR(hh, pkg->config_files,
-                                        config_file->path,
-                                        strlen(config_file->path), config_file);
+                                                config_file->path,
+                                                strlen(config_file->path), config_file);
 
                                 walk = eol + 1;
-                        }
 
+                        }
                 }
 
                 if (strcmp(ae_pathname, "control")) {
                         /* the syntax is exactly Packages syntax, but refactor firxt  */
-                        FILE *fp = fmemopen(inner, inner_sz, "r");
+                        fp = fmemopen(inner, inner_sz, "r");
                         //pkg_repo_linux_deb_parse_packages(pkg->repo, fp, sqlite);
                 }
 
@@ -985,7 +994,7 @@ pkg_linux_deb_read_control(sqlite3 *sqlite, struct pkg *pkg, void *buf, int64_t 
                         //    retcode = EPKG_FATAL;
                         //      goto cleanup;
                 //}
-        //        free(inner);
+                free(inner);
         }
 
         /* after parsing 'control, we have the pkg's id */
@@ -1020,14 +1029,18 @@ pkg_linux_deb_open(char *path)
         struct archive *a = NULL;
         struct archive *inner = NULL;
         struct archive_entry *ae = NULL;
-        struct archive_entry *inner_ae = NULL;
         const char *ae_pathname = NULL;
         int retcode = EPKG_OK;
         int ret = ARCHIVE_FATAL;
         struct pkg *pkg;
+        struct pkg_config_file *cf = NULL;
+        struct stat sb;
 
         int64_t sz;
         void *buf;
+        int fd;
+
+        //struct pkg_config_file *cf;
         
         /*TODO: mocked! */
         pkg = malloc(sizeof(struct pkg));
@@ -1079,7 +1092,6 @@ pkg_linux_deb_open(char *path)
                                 buf, sz);
                 }
                 free(buf);
-
         }
         
         struct pkg_dir *dir = NULL;
@@ -1096,7 +1108,61 @@ pkg_linux_deb_open(char *path)
                         return (EPKG_FATAL);
                 }*/
         }
+
+        /* now we know that all config files are extracted, so put their
+         * content into the db! */
         
+        //struct pkg_config_file *cf = NULL;
+        cf = NULL;
+        while(pkg_config_files(pkg, &cf) == EPKG_OK) {
+                printf("ecf: %s\n", cf->path);
+                
+                /* maybe it is useful (even for the new debian-like pakcages)
+                 * to safe the config file size, so we don't have to stat()
+                 * here. Getting it from the archive is cheaper  */
+                if (stat(cf->path, &sb) == -1) {
+                        //pkg_emit_errno("stat", "");
+                        goto cleanup;
+                }
+
+                printf("sz: %ld\n", sb.st_size);
+                
+                fd = open(cf->path, O_RDONLY);
+                
+                if (fd == -1) {
+                        //pkg_emit_errno("open", "");
+                        goto cleanup;
+                }
+
+                /* again, here we could get the malloc() out of the loop,
+                 * and dance pointer polka */
+                buf = malloc(sb.st_size);
+
+                if (buf == NULL) {
+                        //pkg_emit_errno("malloc", "");
+                        goto cleanup;
+                }
+
+                ret = read(fd, buf, sb.st_size);
+
+                
+//                if (pkg_repo_linux_deb_run_prstatement(UPDATE_CONFIG_FILE, buf,
+//                                cf->path) != SQLITE_DONE) {
+//                        ERROR_SQLITE(sqlite, pkg_repo_linux_deb_sql_prstatement(FILES));
+//                        return (EPKG_FATAL);
+//                }
+
+                //printf("buffer: %s\n", buf);
+                
+                /* free/close even in case of an error */
+                free(buf);
+                close(fd);
+                
+                if (ret == -1) {
+                        //pkg_emit_errno("read", "");
+                        goto cleanup;
+                }
+        }
         
         if (ret != ARCHIVE_OK && ret != ARCHIVE_EOF) {
         //        pkg_emit_error("archive_read_next_header(): %s",
