@@ -52,6 +52,43 @@ pkg_file_new(struct pkg_file **file)
 	return (EPKG_OK);
 }
 
+int
+pkg_dir_new(struct pkg_dir **d)
+{
+	if ((*d = calloc(1, sizeof(struct pkg_dir))) == NULL)
+		return (EPKG_FATAL);
+
+	(*d)->perm = 0;
+	(*d)->fflags = 0;
+
+	return (EPKG_OK);
+}
+
+int
+pkg_dirs(const struct pkg *pkg, struct pkg_dir **d)
+{
+	assert(pkg != NULL);
+
+	HASH_NEXT(pkg->dirs, (*d));
+}
+
+int
+pkg_config_file_new(struct pkg_config_file **c)
+{
+	if ((*c = calloc(1, sizeof(struct pkg_config_file))) == NULL)
+		return (EPKG_FATAL);
+
+	return (EPKG_OK);
+}
+
+int
+pkg_config_files(const struct pkg *pkg, struct pkg_config_file **f)
+{
+	assert(pkg != NULL);
+
+	HASH_NEXT(pkg->config_files, (*f));
+}
+
 /* end of copied functions */
 
 typedef enum _sql_prstmt_index {
@@ -374,10 +411,10 @@ pkg_linux_deb_db_init(sqlite3 *sdb)
 //		"option_id INTEGER PRIMARY KEY,"
 //		"option TEXT NOT NULL UNIQUE"
 //	");"
-	"CREATE TABLE option_desc ("
-		"option_desc_id INTEGER PRIMARY KEY,"
-		"option_desc TEXT NOT NULL UNIQUE"
-	");"
+//	"CREATE TABLE option_desc ("
+//		"option_desc_id INTEGER PRIMARY KEY,"
+//		"option_desc TEXT NOT NULL UNIQUE"
+//	");"
 //	"CREATE TABLE pkg_option ("
 //		"package_id INTEGER NOT NULL REFERENCES packages(id) "
 //			"ON DELETE CASCADE ON UPDATE CASCADE,"
@@ -742,6 +779,82 @@ cleanup:
         return retcode;
 }
 
+int
+pkg_repo_linux_deb_handle_data(void *buf, int64_t sz, struct pkg *pkg)
+{        
+        struct archive *a = NULL;
+        struct archive_entry *ae = NULL;
+        pkg_error_t retcode = EPKG_OK;
+        int ret = ARCHIVE_FATAL;
+
+        char dest[MAXPATHLEN];
+
+        struct pkg_dir *dir;
+
+        a = archive_read_new();
+        ae = archive_entry_new();
+
+        archive_read_support_filter_all(a);
+        archive_read_support_format_all(a);
+
+        /* 4096 set elsewhere too ... */
+        if (archive_read_open_memory(a, buf, sz) != ARCHIVE_OK) {
+           //     pkg_emit_error("archive_read_open_memory: %s",
+           //             archive_error_string(a)); 
+                retcode = EPKG_FATAL;
+                goto cleanup;
+        } 
+
+
+        while(archive_read_next_header(a, &ae) == ARCHIVE_OK) {
+
+                snprintf(dest, sizeof(dest), "%s/%s", pkg->prefix,
+                        archive_entry_pathname(ae) + 2); // <-- skip "./"
+
+                int len = strlen(dest);
+
+                /* are we are dealing with a directory? */
+                if (dest[len - 1] == '/') {
+                        pkg_dir_new(&dir);
+                        strlcpy(dir->path, dest, len);
+                
+                        HASH_ADD_KEYPTR(hh, pkg->dirs, dir->path,
+                        strlen(dir->path), dir);
+                }
+                        
+                printf("dest: %s\n", dest);
+
+                archive_entry_set_pathname(ae, dest);
+                //printf("pn: %s\n", archive_entry_pathname(ae));
+                //pkg_debug(1, "Extracting: to %s", dest);
+
+                /* TODO: emit progress ticks, via pkg_emit_progress_tick and
+                 * archive_read_extract_set_progress_callback  */
+                if (archive_read_extract(a, ae, EXTRACT_ARCHIVE_FLAGS) != ARCHIVE_OK) {
+          //              pkg_emit_error("archive_read_extract(): %s",
+          //                              archive_error_string(a));
+                    //    retcode = EPKG_FATAL;
+                  //      goto cleanup;
+                }
+        }
+        
+
+        if (ret != ARCHIVE_OK && ret != ARCHIVE_EOF) {
+           //     pkg_emit_error("archive_read_next_header(): %s",
+           //             archive_error_string(a));
+
+                retcode = EPKG_FATAL;
+                /* goto cleanup anyway */
+        }  
+
+cleanup:
+        if (a != NULL) {
+                archive_read_close(a);
+                archive_read_free(a);
+        }
+        return retcode;
+}
+
 
 int
 pkg_repo_util_extract_mmap()
@@ -759,15 +872,14 @@ pkg_linux_deb_read_control(sqlite3 *sqlite, struct pkg *pkg, void *buf, int64_t 
         //int fd;
         char *inner, *walk;
         int64_t inner_sz;
+        char dest[MAXPATHLEN];
         const char *ae_pathname;
 
         struct pkg_file *file;
+        struct pkg_dir *dir;
+        struct pkg_config_file *config_file;
         char *next, *pos, *eol;
- 
-        /*TODO: mocked! */
-        pkg = malloc(sizeof(struct pkg));
-        pkg->prefix = strdup("/compat/linux/");
-        /* end mocked */
+
 
         a = archive_read_new();
         ae = archive_entry_new();
@@ -786,15 +898,19 @@ pkg_linux_deb_read_control(sqlite3 *sqlite, struct pkg *pkg, void *buf, int64_t 
         while(archive_read_next_header(a, &ae) == ARCHIVE_OK) {
 
                 ae_pathname = archive_entry_pathname(ae);
-                //printf("ffll: %s\n", ae_pathname);
+                snprintf(dest, sizeof(dest), "%s/%s", pkg->prefix,
+                        archive_entry_pathname(ae) + 2); // <-- skip "./"
+                
                 inner_sz = archive_entry_size(ae);
 
+                /* if this turns out to be too slow, it is possible to malloc,
+                 * the whole archive size, and do a pointer polka here */
                 inner = malloc(inner_sz);
 
+                /* skip prepending './' */
                 if (strcmp(ae_pathname + 2, "md5sums") == 0) {
 
                         /* read files here */
-
 
                         archive_read_data(a, inner, inner_sz);
                         //printf("%s", inner);
@@ -805,17 +921,15 @@ pkg_linux_deb_read_control(sqlite3 *sqlite, struct pkg *pkg, void *buf, int64_t 
                         while (walk - inner < inner_sz) {
                                 pkg_file_new(&file);
 
-                                pos = strchr(inner, ' ');
-                                //strlcpy(inner, pos);
-                                file->sum = strndup(inner, pos - inner);
-                                printf("pos: %s\n", file->sum);
+                                pos = strchr(walk, ' ');
+                                file->sum = strndup(walk, pos - walk);
+                                printf("md5sum: %s\n", file->sum);
 
                                 eol = strchr(walk, '\n');
 
-
                                 snprintf(file->path, sizeof(file->path), "%s/",
                                                 pkg->prefix);
-                                printf("path:%s\n", file->path);
+                                
                                 /* two blanks are seperating, thus + 2 */
                                 strlcat(file->path, pos + 2,
                                                 eol - pos + strlen(file->path));
@@ -826,33 +940,67 @@ pkg_linux_deb_read_control(sqlite3 *sqlite, struct pkg *pkg, void *buf, int64_t 
 
                                 walk = eol + 1;
                         }
+                        continue;
                 }
 
-                if (strcmp(ae_pathname, "conffiles")) {
-                        /* local.sqlite is emtpy at my dev-machine, disucss
-                         * but this is  exactly the same procedure as above
-                         **/
+                if (strcmp(ae_pathname + 2, "conffiles") == 0) {
+                        archive_read_data(a, inner, inner_sz);
+
+                        walk = inner;
+
+                        while (walk - inner < inner_sz) {
+                                pkg_config_file_new(&config_file);
+
+                                eol = strchr(walk, '\n');
+                                snprintf(config_file->path,
+                                        sizeof(config_file->path), "%s",
+                                        pkg->prefix);
+                                strlcat(config_file->path, walk, eol - walk +
+                                        strlen(config_file->path) + 1);
+
+                                printf("config file:%s\n", config_file->path);
+
+                                HASH_ADD_KEYPTR(hh, pkg->config_files,
+                                        config_file->path,
+                                        strlen(config_file->path), config_file);
+
+                                walk = eol + 1;
+                        }
+
                 }
-                
+
                 if (strcmp(ae_pathname, "control")) {
                         /* the syntax is exactly Packages syntax, but refactor firxt  */
                         FILE *fp = fmemopen(inner, inner_sz, "r");
-                        pkg_repo_linux_deb_parse_packages(pkg->repo, fp, sqlite);
+                        //pkg_repo_linux_deb_parse_packages(pkg->repo, fp, sqlite);
                 }
 
                 //printf("pn: %s\n", archive_entry_pathname(ae));
                 //pkg_debug(1, "Extracting: to %s", dest);
 
-                if (archive_read_extract(a, ae, EXTRACT_ARCHIVE_FLAGS) != ARCHIVE_OK) {
+                //archive_entry_set_pathname(ae, dest);
+                //if (archive_read_extract(a, ae, EXTRACT_ARCHIVE_FLAGS) != ARCHIVE_OK) {
                         //              pkg_emit_error("archive_read_extract(): %s",
                         //                              archive_error_string(a));
                         //    retcode = EPKG_FATAL;
                         //      goto cleanup;
-                }
+                //}
+        //        free(inner);
         }
 
         /* after parsing 'control, we have the pkg's id */
 
+        file = NULL;
+        /* so add files */
+        /*while (pkg_files(pkg, &file) == EPKG_OK) {
+                if (pkg_repo_linux_deb_run_prstatement(FILES, file->path,
+                                file->sum, pkg->id) != SQLITE_DONE) {
+                        ERROR_SQLITE(sqlite, pkg_repo_linux_deb_sql_prstatement(FILES));
+                        return (EPKG_FATAL);
+                }
+        } */
+
+        /* and while we are at it, the directories too */
 
         if (ret != ARCHIVE_OK && ret != ARCHIVE_EOF) {
                 //     pkg_emit_error("archive_read_next_header(): %s",
@@ -867,7 +1015,7 @@ cleanup:
 }
 
 int
-pkg_linux_deb_open(char *path, char *dest)
+pkg_linux_deb_open(char *path)
 {
         struct archive *a = NULL;
         struct archive *inner = NULL;
@@ -880,6 +1028,12 @@ pkg_linux_deb_open(char *path, char *dest)
 
         int64_t sz;
         void *buf;
+        
+        /*TODO: mocked! */
+        pkg = malloc(sizeof(struct pkg));
+        pkg->prefix = strdup("/tmp/dest");
+        /* end mocked */
+
 
         a = archive_read_new();
 
@@ -911,16 +1065,38 @@ pkg_linux_deb_open(char *path, char *dest)
                 int rsz =  archive_read_data(a, buf, sz);
                 printf("here: %d\n", rsz);
 
-                if (strcmp(ae_pathname, "data.tar.gz") == 0) {
-                        pkg_repo_util_extract_memory(buf, sz, dest);
+                /* there are by specification several possible endings
+                 * e.g. (.gz, .xz) */
+                if (strstr(ae_pathname, "data.tar.") != NULL) {
+                //        pkg_repo_util_extract_memory(buf, sz, dest);
+                        pkg_repo_linux_deb_handle_data(buf, sz, pkg);
+
                 }
 
-                if (strcmp(ae_pathname, "control.tar.gz") == 0) {
-                        pkg_linux_deb_read_control(NULL, NULL,
+                /* here too of course */
+                if (strstr(ae_pathname, "control.tar.") != NULL) {
+                        pkg_linux_deb_read_control(NULL, pkg,
                                 buf, sz);
                 }
+                free(buf);
 
-        }   
+        }
+        
+        struct pkg_dir *dir = NULL;
+        while(pkg_dirs(pkg, &dir) == EPKG_OK) {
+                printf("dir: %s\n", dir->path);
+               /* if (pkg_repo_linux_deb_run_prstatement(DIRS1, dir->path)
+                                 != SQLITE_DONE) {
+                        ERROR_SQLITE(sqlite, pkg_repo_linux_deb_sql_prstatement(DIRS1));
+                        return (EPKG_FATAL);
+                }
+                if (pkg_repo_linux_deb_run_prstatement(DIRS2, pkg->id, dir->path, 1)
+                                 != SQLITE_DONE) {
+                        ERROR_SQLITE(sqlite, pkg_repo_linux_deb_sql_prstatement(DIRS2));
+                        return (EPKG_FATAL);
+                }*/
+        }
+        
         
         if (ret != ARCHIVE_OK && ret != ARCHIVE_EOF) {
         //        pkg_emit_error("archive_read_next_header(): %s",
@@ -929,15 +1105,14 @@ pkg_linux_deb_open(char *path, char *dest)
         //        retcode = EPKG_FATAL;
                 /* goto cleanup anyway */
         }
-//        printf("p: %s\n", archive_entry_sourcepath(ae));
-  //archive_read_data_skip(a);  // Note 2
 
-        //ret = archive_read_next_header(a, &ae);
 cleanup:
         ret = archive_read_free(a);
  
 }
 
+/* mocked */
+int
 pkg_add_common_linux_deb(sqlite3 *sqlite, char *path, unsigned flags,
         struct pkg_manifest_key *keys, const char *location)
 {
@@ -950,5 +1125,5 @@ pkg_add_common_linux_deb(sqlite3 *sqlite, char *path, unsigned flags,
 int main (int argc, char *args[]) {
         printf("arg1: %s\n", args[1]);        
 
-      pkg_linux_deb_open(args[1], "/tmp/dest"); 
+      pkg_linux_deb_open(args[1]); 
 }
